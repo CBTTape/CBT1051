@@ -1,0 +1,36 @@
+EMFSRV   CSECT
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:         EMFSRV                                            */
+*/*                                                                 */
+*/* Description:  Contains a collection of address vectors,         */
+*/*               constants, queue anchors and counters common      */
+*/*               to all subsystem server routines.                 */
+*/*                                                                 */
+*/* Attributes:   Non-exacutable                                    */
+*/*               Write-protected                                   */
+*/*               Page-fixed                                        */
+*/*               Dynamic-LPA resident                              */
+*/*                                                                 */
+*/* Restrictions: All offsets fixed by architecture                 */
+*/*                                                                 */
+*/* Copyright:    Ben Marino. 2021 - 2024 (unpublished)             */
+*/*                                                                 */
+*/*******************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+         COPY  ZGBLS
+EMFSRV   AMODE 31
+EMFSRV   RMODE ANY
+*
+**       Generate ZEVT control table
+*
+         ENTRY EMFSRV
+         ZEVT  DSECT=NO,LIST=YES
+         END   ,

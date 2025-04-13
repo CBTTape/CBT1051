@@ -1,0 +1,31 @@
+*/*********************************************************************
+*/*
+*/*                          zEMF
+*/*                   SUBSYSTEM SERVER
+*/*                  SHUTDOWN PROCEDURE
+*/*
+*/*
+*/* Issue the following zEMF command to shutdown the subsystem server:
+*/*
+*/*   ZEMF SHUTDOWN
+*/*
+*/*
+*/* zEMF internally issues the following SSI delete MVS command:
+*/*
+*/*   SETSSI DELETE,SUB=ZEMF,FORCE
+*/*
+*/*
+*/* Successful server shutdown issues the the following messages:
+*/*
+*/*   ZEMF97I  ZEMF Subsystem server termination in progress
+*/*   IEFJ022I SETSSI DELETE COMMAND FOR SUBSYSTEM ZEMF COMPLETED
+*/*            SUCCESSFULLY
+*/*   ZEMF98I  ZEMF Subsystem server termination complete
+*/*
+*/*
+*/* Feel free to contact me if you have questions.
+*/*
+*/*  Ben Marino
+*/*  b2marino@outlook.com
+*/*
+*/*********************************************************************

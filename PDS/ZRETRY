@@ -1,0 +1,138 @@
+         MACRO
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Nane:        ZRETRY                                             */
+.*/*                                                                 */
+.*/* Function:    Subsystem server recovery retry macro              */
+.*/*                                                                 */
+.*/* Description: Used by TCB-mode and SRB-mode service routines     */
+.*/*              to set and reset recovery retry points.            */
+.*/*                                                                 */
+.*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)              */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @00 | V1R1 | 09242023 | Ben Marino  | Initial version              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+         ZRETRY &LABEL,&ZRWA=,&MOD=,&SRV=,&RSN=,                       +
+               &WTO=NO,&DUMP=NO,&LOGREC=NO
+.*
+         LCLC  &NORTY
+&NORTY   SETC  'RTY'.'&SYSNDX'
+.*
+         AIF   ('&ZRWA' EQ '').ERR05
+         AIF   ('&LABEL' EQ '').ERR01
+.*
+         AIF   ('&ZRWA'(1,1) EQ '(').RTY000
+&GPR     SETC  '1'
+         LA    &GPR,&ZRWA                       .ZRWA
+         AGO   .RTY001
+
+.RTY000  ANOP  ,
+&GPR     SETC  '&ZRWA'                          .ZRWA
+.*
+.RTY001  ANOP  ,
+         AIF   ('&LABEL' EQ 'OFF').RTYOFF
+         XC    ZRWAFLG1-ZRWA(1,&GPR),ZRWAFLG1-ZRWA(&GPR)
+.*
+         AIF   ('&SRV' EQ '').RTY005
+         AIF   ('&SRV' EQ 'MIDNAME').RTY002
+         AIF   ('&SRV' EQ 'ZRWAXECT').RTY002
+         MVC   ZRWASECT-ZRWA(8,&GPR),=CL8'&SRV'
+         AGO   .RTY010
+.*
+.RTY002  ANOP  ,
+         MVC   ZRWASECT-ZRWA(8,&GPR),&SRV
+         AGO   .RTY010
+.*
+.RTY005  ANOP  ,
+         MVC   ZRWASECT-ZRWA(8,&GPR),ZRWAXECT-ZRWA(&GPR)
+.*
+.RTY010  ANOP  ,
+         AIF   ('&MOD' EQ '').RTY020
+         AIF   ('&MOD' EQ 'MIDNAME').RTY015
+         MVC   ZRWALMOD-ZRWA(8,&GPR),=CL8'&MOD'
+         AGO   .RTY030
+.*
+.RTY015  ANOP  ,
+         MVC   ZRWALMOD-ZRWA(8,&GPR),&SRV
+         AGO   .RTY030
+.*
+.RTY020  ANOP  ,
+         MVC   ZRWALMOD-ZRWA(8,&GPR),ZRWAXMOD-ZRWA(&GPR)
+.*
+.RTY030  ANOP  ,
+         AIF   ('&DUMP' EQ 'YES').RTY035
+         AIF   ('&DUMP' NE 'NO').ERR02
+         NI    ZRWAFLG1-ZRWA(&GPR),XFF-ZRWA@DMP .DUMP=NO
+         AGO   .RTY040
+.*
+.RTY035  ANOP  ,
+         OI    ZRWAFLG1-ZRWA(&GPR),ZRWA@DMP .DUMP=YES
+.*
+.RTY040  ANOP  ,
+         AIF   ('&WTO' EQ 'YES').RTY045
+         AIF   ('&WTO' NE 'NO').ERR02
+         NI    ZRWAFLG1-ZRWA(&GPR),XFF-ZRWA@WTO .WTO=NO
+         AGO   .RTY050
+.*
+.RTY045  ANOP  ,
+         OI    ZRWAFLG1-ZRWA(&GPR),ZRWA@WTO .WTO=YES
+.*
+.RTY050  ANOP  ,
+         AIF   ('&LOGREC' EQ 'YES').RTY055
+         AIF   ('&LOGREC' NE 'NO').ERR04
+         NI    ZRWAFLG1-ZRWA(&GPR),XFF-ZRWA@LOG .LOGREC=NO
+         AGO   .RTY060
+.*
+.RTY055  ANOP  ,
+         OI    ZRWAFLG1-ZRWA(&GPR),ZRWA@LOG .LOGREC=YES
+.*
+.RTY060  ANOP  ,
+         AIF   ('&RSN' EQ '').RTY080
+         AIF   ('&RSN'(1,1) EQ '(').RTY070
+         MVC   ZRWARSN-ZRWA(4,&GPR),&RSN .RSN
+         AGO   .RTY080
+.*
+.RTY070  ANOP  ,
+         ST    &RSN,ZRWARSN-ZRWA(,&GPR) .RSN
+.*
+.RTY080  ANOP  ,
+         AIF   ('&LABEL'(1,1) NE '(').RTY090
+         LR    15,&LABEL                .retry address
+         AGO   .RTY099
+.*
+.RTY090  ANOP  ,
+         LA    15,&LABEL                .retry address
+.*
+.RTY099  ANOP  ,
+         BSM   15,0                     .AMODE
+         ST    15,ZRWARTRY-ZRWA(,&GPR)  .retry address
+         STM   0,15,ZRWAGPRS-ZRWA(&GPR) .retry GPRs
+         STAM  0,15,ZRWAARS-ZRWA(&GPR)  .retry ARs
+         MEXIT ,
+*
+.RTYOFF  ANOP  ,
+         XC    ZRWAFLG1-ZRWA(1,&GPR),ZRWAFLG1-ZRWA(&GPR)
+         XC    ZRWARTRY-ZRWA(4,&GPR),ZRWARTRY-ZRWA(&GPR)
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.ERR01   MNOTE 8,'*** ZRETRY - RETRY label specification error'
+         MEXIT ,
+.ERR02   MNOTE 8,'*** ZRETRY - SDUMP operand specification error'
+         MEXIT ,
+.ERR03   MNOTE 8,'*** ZRETRY - WTO operand specification error'
+         MEXIT ,
+.ERR04   MNOTE 8,'*** ZRETRY - LOGREC operand specification error'
+         MEXIT ,
+.ERR05   MNOTE 8,'*** ZRETRY - ZRWA operand specification error'
+         MEXIT ,
+.ERR06   MNOTE 8,'*** ZRETRY - FRR operand specification error'
+         MEND  ,

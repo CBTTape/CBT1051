@@ -1,0 +1,2553 @@
+         MACRO
+         ZEVT  &DSECT=YES,&LIST=NO
+         COPY  ZGBLS
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         ZEVT                                               */
+*/*                                                                  */
+*/* Description:  The ZEVT is a collection of address vectors,       */
+*/*               constants, queue anchors and counters common       */
+*/*               to all ZEMF components routines.                   */
+*/*                                                                  */
+*/* Attributes:   Non-exacutable                                     */
+*/*               Write-protected                                    */
+*/*               Page-fixed                                         */
+*/*               Dynamic-LPA resident                               */
+*/*                                                                  */
+*/* Restrictions: All offsets fixed by architecture                  */
+*/*                                                                  */
+*/* Control Maps: The following maps are defined at the bottom       */
+*/*               of the ZEVT control table:                         */
+*/*                                                                  */
+*/*               XSA  - Service routine extended savearea           */
+*/*               DAB  - Dynamic allocation/deallocation block       */
+*/*               FRR  - SETFRR recovery workarea                    */
+*/*               EQU  - General subsystem server equates            */
+*/*               ZXQE - Exit request element                        */
+*/*               ZRWA - ESTAE subsystem server recovery workarea    */
+*/*               ZTKN - System-Level Name/Token pair                */
+*/*                                                                  */
+*/* Copyright:    Ben Marino. 2021 - 2024 (unpublished)              */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+         PUSH  PRINT
+         AIF   ('&LIST' EQ 'YES').EVT000
+         PRINT OFF
+.EVT000  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').EVT010
+         AIF   ('&DSECT' EQ 'NO').EVT020
+         MEXIT ,
+.EVT010  ANOP  ,
+ZEVT     DSECT ,
+ZEVTID   DC    CL4'ZEVT'
+         AGO   .EVT030
+.EVT020  ANOP  ,
+ZEVT     DS    0F
+ZEVTID   DC    CL4'ZEVT'
+.EVT030  ANOP  ,
+*
+**       (*) Subsystem server fixed offsets
+*
+ZEVTFLGS DS    0XL4             *FIXED OFFSETS
+ZEVTFLG1 DC    XL1'00'           *flags
+ZEVT@ACT EQU   X'80'              *subsystem is active
+ZEVT@INI EQU   X'40'              *subsystem initialization complete
+ZEVT@TRM EQU   X'20'              *subsystem termination complete
+ZEVT@SSI EQU   X'10'              *listeners activation complete
+ZEVT@ABN EQU   X'08'              *subsystem terminated abnormally
+ZEVT@ROV EQU   X'04'              *ZEVT read-only indicator
+ZEVT@DEF EQU   X'02'              *default INITPARMs are in effect
+ZEVT@DWN EQU   X'01'              *subsystem shutdown complete
+         DC    0X
+ZEVTFLG2 DC    XL1'00'           *flags
+ZEVT@LIB EQU   X'80'              *INITPARM LIB=DSName
+ZEVT@MEM EQU   X'40'              *INITPARM MEM=member
+ZEVT@SAF EQU   X'20'              *INITPARM SAF=class
+ZEVT@TRC EQU   X'10'              *INITPARM TRC={ON|OFF}
+ZEVT@DBG EQU   X'08'              *INITPARM DBG={ON|OFF)
+ZEVT@RCV EQU   X'04'              *INITPARM RCV={NO|YES}
+ZEVT@TST EQU   X'02'              *INITPARM TST={NO|exitname}
+ZEVT@V27 EQU   X'01'              *-available
+         DC    0X
+ZEVTFLG3 DC    XL1'00'           *flags
+ZEVT@ALR EQU   X'80'              *ASN and LX reuse enabled
+ZEVT@V31 EQU   X'40'              *-available
+ZEVT@V32 EQU   X'20'              *-available
+ZEVT@V33 EQU   X'10'              *-available
+ZEVT@V34 EQU   X'08'              *-available
+ZEVT@V35 EQU   X'04'              *-available
+ZEVT@V36 EQU   X'02'              *-available
+ZEVT@V37 EQU   X'01'              *-available
+         DC    0X
+ZEVTFLG4 DC    XL1'00'           *flags
+ZEVT@V40 EQU   X'80'              *-available
+ZEVT@V41 EQU   X'40'              *-available
+ZEVT@V42 EQU   X'20'              *-available
+ZEVT@V43 EQU   X'10'              *-available
+ZEVT@V44 EQU   X'08'              *-available
+ZEVT@V45 EQU   X'04'              *-available
+ZEVT@V46 EQU   X'02'              *-available
+ZEVT@V47 EQU   X'01'              *-available
+*
+**       (*) Subsystem server fixed offsets
+*
+ZEVTFX   DS    0A                *FIXED OFFSETS
+ZEVTSRVA DC    A(0)               *EMFSRV EPA
+ZEVTPARA DC    V(EMFPAR)          *EMFPAR entry address
+ZEVTMSGA DC    V(EMFMSG)          *EMFMSG entry address
+ZEVTXITA DC    V(EMFXIT)          *EMFXIT entry address
+ZEVTRTMA DC    V(EMFRTM)          *EMFRTM entry address
+ZEVTADDX DC    V(ADDEXIT)         *Dynamic exit add entry EPA
+ZEVTDELX DC    V(DELEXIT)         *Dynamic exit delete entry EPA
+ZEVTMODX DC    V(MODEXIT)         *Dynamic exit modify entry EPA
+ZEVTGETT DC    V(GETTABS)         *Storage obtain exit tables EPA
+ZEVTFRET DC    V(FRETABS)         *Storage release exit tables EPA
+ZEVTXPAR DC    V(XMEMPAR)         *Exit member parse routine EPA
+ZEVTXQUE DC    V(XMEMQUE)         *Exit element queue routine EPA
+ZEVTALLO DC    V(ALLOC)           *Dynamic allocation EPA
+ZEVTDEAL DC    V(DEALLOC)         *Dynamic deallocation EPA
+ZEVTCRET DC    V(ALLOCRT)         *Dynamic allocation retrieval EPA
+ZEVTLCLG DC    V(GETLOCL)         *obtain LOCAL lock EPA
+ZEVTLCLF DC    V(FRELOCL)         *Release LOCAL lock EPA
+ZEVTCMSG DC    V(GETCMS)          *Obtain LOCAL & CMS locks EPA
+ZEVTCMSF DC    V(FRECMS)          *Release CMS & LOCAL locks EPA
+ZEVTPASN DC    V(SETPASN)         *Non-cross-memory mode EPA
+ZEVTSASN DC    V(SETSASN)         *Cross-memory mode EPA
+ZEVTRACE DC    V(TRACE)           *Trace service EPA
+ZEVTRVN0 DC    A(0)               *available
+ZEVTRVN1 DC    A(0)               *available
+ZEVTRVN2 DC    A(0)               *available
+ZEVTRVN3 DC    A(0)               *available
+ZEVTRVN4 DC    A(0)               *available
+ZEVTRVN5 DC    A(0)               *available
+ZEVTRVN6 DC    A(0)               *available
+ZEVTRVN7 DC    A(0)               *available
+         DS    0A
+ZEVTXACT DC    A(0)               *in-flight exits
+ZEVTZXQE DC    A(0)               *ZXQE cell pool ID
+ZEVTZEXT DC    A(0)               *ZEXT cell pool ID
+ZEVTSIZE DC    A(0)               *ZEVT size
+ZEVTZEVT DC    A(0)               *ZEVT address
+ZEVTSSCT DC    A(0)               *SSCT address
+ZEVTMSTE DC    A(0)               *MSTE table address
+ZEVTMSEL DC    A(0)               *MSTE table size
+ZEVTMSTZ DC    A(0)               *MSTE entry size
+ZEVTDYNE DC    A(0)               *DYNX table entries
+ZEVTRVZ3 DC    A(0)               *available
+ZEVTRVZ4 DC    A(0)               *available
+ZEVTRVZ5 DC    A(0)               *available
+ZEVTRVZ6 DC    A(0)               *available
+ZEVTRVZ7 DC    A(0)               *available
+         DS    0C
+ZEVTSUBN DC    CL4'&SUB'          *ZEMF subsystem name
+ZEVTLPTK DC    XL8'0'             *ZEMFSRV delete token
+ZEVTQNAM DC    CL8'ZEMFQUE'       *ZXQE ENQ/DEQ major
+ZEVTCSCB DC    CL8'SYSIEFSD'      *CSCB ENQ/DEQ major
+ZEVTQ10  DC    CL3'Q10'           *CSCB ENQ/DEQ minor
+ZEVTRSV5 DC    CL5' '             *reserved
+ZEVTVERS DC    CL6'&REL'          *product version
+ZEVTRSV8 DC    CL8' '             *available
+ZEVT@FXZ EQU   *-ZEVTFX          *END-OF-FIXED OFFSETS
+*
+**       Subsystem server ZXQE queues
+*
+ZEVTQUES DS    0D                  ZXQE queues
+ZEVTUTLQ DC    A(0)                -IEFUTL queue
+ZEVTUTLC DC    F'0'                -IEFUTL entry count
+ZEVTUTLN DC    CL8'IEFUTL'         -IEFUTL exit name
+*
+ZEVTUSOQ DC    A(0)                -IEFUSO queue
+ZEVTUSOC DC    F'0'                -IEFUSO entry count
+ZEVTUSON DC    CL8'IEFUSO'         -IEFUSO exit name
+*
+ZEVTUJPQ DC    A(0)                -IEFUJP queue
+ZEVTUJPC DC    F'0'                -IEFUJP entry count
+ZEVTUJPN DC    CL8'IEFUJP'         -IEFUJP exit name
+*
+ZEVTU29Q DC    A(0)                -IEFU29 queue
+ZEVTU29C DC    F'0'                -IEFU29 entry count
+ZEVTU29N DC    CL8'IEFU29'         -IEFU29 exit name
+*
+ZEVT29LQ DC    A(0)                -IEFU29L queue
+ZEVT29LC DC    F'0'                -IEFU29L entry count
+ZEVT29LN DC    CL8'IEFU29L'        -IEFU29L exit name
+*
+ZEVTU83Q DC    A(0)                -IEFU83 queue
+ZEVTU83C DC    F'0'                -IEFU83 entry count
+ZEVTU83N DC    CL8'IEFU83'         -IEFU83 exit name
+*
+ZEVTU84Q DC    A(0)                -IEFU84 queue
+ZEVTU84C DC    F'0'                -IEFU84 entry count
+ZEVTU84N DC    CL8'IEFU84'         -IEFU84 exit name
+*
+ZEVTU85Q DC    A(0)                -IEFU85 queue
+ZEVTU85C DC    F'0'                -IEFU85 entry count
+ZEVTU85N DC    CL8'IEFU85'         -IEFU85 exit name
+*
+ZEVTU86Q DC    A(0)                -IEFU86 queue
+ZEVTU86C DC    F'0'                -IEFU86 entry count
+ZEVTU86N DC    CL8'IEFU86'         -IEFU86 exit name
+*
+ZEVTQUEZ DC    A(-1)               -END-of-queues
+ZEVTQUEC DC    A(-1)               -END-of-queues
+ZEVTQUEN DC    CL8' '              -END-of-queues
+ZEVTQUEE EQU   *-ZEVTQUEZ           entry size
+*
+**       Subsystem server general data
+*
+         DS    0F
+ZEVTCMDC DC    F'0'                EMFCMD listener entry count
+ZEVTEOMC DC    F'0'                EMFEOM listener entry count
+ZEVTXITC DC    F'0'                EMFXIT exit entry count
+ZEVTADDC DC    F'0'                ADDEXIT routine entry count
+ZEVTDELC DC    F'0'                DELEXIT routine entry count
+ZEVTMODC DC    F'0'                MODEXIT routine entry count
+ZEVTRVA9 DC    F'0'                -available
+ZEVTRVAA DC    F'0'                -available
+ZEVTRVAB DC    F'0'                -available
+ZEVTRVAC DC    F'0'                -available
+ZEVTRVAD DC    F'0'                -available
+ZEVTRVAE DC    F'0'                -available
+ZEVTRVAF DC    F'0'                -available
+ZEVTRVAG DC    F'0'                -available
+ZEVTRVAH DC    F'0'                -available
+*
+**       SSCT subsystem vector table
+*
+ZEVTSSVT DS    0D
+ZEVTMTRX ZTABS GEN=SSI,DSECT=NO    SSVT table
+ZEVTSSVZ EQU   *-ZEVTSSVT          SSVT table size
+*
+**       Common subsystem server constants
+*
+ZEVTDFLT DS    0F
+ZEVTAR0F DC    XL64'0'             AR0-AR15 ALET zero values
+ZEVTXMSM DC    XL4'00000100'       cross-memory mode value
+ZEVTX40S DC    XL4'40000000'       MVCL scrub value
+         DS    0D
+ZEVTJESN DC    CL4'JESn'           JES subsysytem name
+ZEVTZINI DC    CL8'EMFINI'         Initialization routine
+ZEVTZEMF DC    CL8'&SERVER'        Subsystem server name
+ZEVTMSTR DC    CL8'&EMFMSTR'       PARMLIB ZEMFMSTR default
+ZEVTPDDN DC    CL8'&PARMDDN'       PARMLIB DDname default
+ZEVTPLIB DC    CL44'&PARMDSN'      PARMLIB DSName default
+         DS    0C
+ZEVTCSZE DC    AL1(8)              SAF class length
+ZEVTCLAS DC    CL8'NONE'           SAF=NO default
+ZEVTCONS DC    CL8' '              Console name
+ZEVTSYSN DC    CL8' '              CVTSNAME
+ZEVTLPAR DC    CL8' '              LPAR name
+ZEVTVMID DC    CL8' '              VM host ID
+ZEVTVZS1 DC    CL8' '              -available
+ZEVTVZS2 DC    CL8' '              -available
+ZEVTWZR3 DC    CL8' '              -available
+ZEVTWZR4 DC    CL8' '              -available
+ZEVTWZR5 DC    CL8' '              -available
+ZEVTWZR6 DC    CL8' '              -available
+ZEVTWZR7 DC    CL8' '              -available
+         DS    0F
+ZEVTPARM DC    CL60' '             INITPARM string
+ZEVTPAR2 DC    CL60' '             parameter data overflow
+ZEVT@PLN EQU   *-ZEVTPARM          INITPARM length
+ZEVTZCNV DC    CL16'0123456789ABCDEF' conversion table
+ZEVTEDIT DC    XL10'40206B2020206B202120' EDit mask
+ZEVTENDR DC    CL4'END'            ZPAR end record keyword
+ZEVTFINR DC    CL6'FINAL'          ZPAR final record keyword
+ZEVTSEQN DC    CL8'INSERTED'       ZPAR inserted record sequence#
+ZEVTNLMT DC    CL7'NOLIMIT'        NOLIMIT keyword
+ZEVTEXIT DC    CL8'NO'             TST=NO default
+         DS    0D
+ZEVTISTK DC    CL08' '             initialization time TOD value
+ZEVTOSTK DC    CL16' '             initialization time in decimal
+ZEVTPRTK DC    CL16' '             persisten system-level token name
+*
+**       Subsystem server debugging data
+*
+ZEVTSRVC DS    0C
+ZEVTDOTS DC    39C'.'              39-dots     (DONOT change)
+ZEVTZERO DC    8X'00'              8-hex zeros (DONOT change)
+ZEVTGENC DC    CL8'********'       8-generics  (DONOT change)
+ZEVTBLKS DC    256C' '             256-blanks  (DONOT change)
+ZEVTZONE DC    CL8'00000000'       8-numerics  (DONOT change)
+ZEVT@SRZ EQU   *-ZEVTSRVC
+ZEVTTYPE DC    CL4'READ'           {READ|R/W|LOCAL}
+         DS    0D
+ZEVTLOCL EQU   *-ZEVT              Local ZEVT size
+*
+**       INI= Stand-alone trace data
+*
+ZTRCINX1 DC    CL4'INI='           trace ID
+ZTRCINX2 DC    CL8'EMFINI'         routine ID
+ZTRCINTR DS    0CL39               trace data
+ZTRCINIA DC    CL1'.'              -trace data
+ZTRCINIB DC    CL1'.'              -trace data
+ZTRCINIC DC    CL1'.'              -trace data
+ZTRCINID DC    CL1'.'              -trace data
+ZTRCINIE DC    CL1'.'              -trace data
+ZTRCINIF DC    CL1'.'              -trace data
+ZTRCINIG DC    CL1'.'              -trace data
+ZTRCINIH DC    CL1'.'              -trace data
+ZTRCINII DC    CL1'.'              -trace data
+ZTRCINIJ DC    CL1'.'              -trace data
+ZTRCINIK DC    CL1'.'              -trace data
+ZTRCINIL DC    CL1'.'              -trace data
+ZTRCINIM DC    CL1'.'              -trace data
+ZTRCININ DC    CL1'.'              -trace data
+ZTRCINIO DC    CL1'.'              -trace data
+ZTRCINIP DC    CL1'.'              -trace data
+ZTRCINIQ DC    CL1'.'              -trace data
+ZTRCINIR DC    CL1'.'              -trace data
+ZTRCINIS DC    CL1'.'              -trace data
+ZTRCINIT DC    CL1'.'              -trace data
+ZTRCINIU DC    CL1'.'              -trace data
+ZTRCINIV DC    CL1'.'              -trace data
+ZTRCINIW DC    CL1'.'              -trace data
+ZTRCINIX DC    CL1'.'              -trace data
+ZTRCINIY DC    CL1'.'              -trace data
+ZTRCINIZ DC    CL1'.'              -trace data
+ZTRCINI0 DC    CL1'.'              -trace data
+ZTRCINI1 DC    CL1'.'              -trace data
+ZTRCINI2 DC    CL1'.'              -trace data
+ZTRCINI3 DC    CL1'.'              -trace data
+ZTRCINI4 DC    CL1'.'              -trace data
+ZTRCINI5 DC    CL1'.'              -trace data
+ZTRCINI6 DC    CL1'.'              -trace data
+ZTRCINI7 DC    CL1'.'              -trace data
+ZTRCINI8 DC    CL1'.'              -trace data
+ZTRCINI9 DC    CL1'.'              -trace data
+ZTRCINI$ DC    CL1'.'              -trace data
+ZTRCINI# DC    CL1'.'              -trace data
+ZTRCINI@ DC    CL1'.'              -trace data
+ZTRC@INZ EQU   *-ZTRCINTR          trace data size
+*
+**       CSM= Stand-alone trace data
+*
+ZTRCCSX1 DC    CL4'CSM='           trace ID
+ZTRCCSX2 DC    CL8'EMFCSM'         routine ID
+ZTRCCSTR DS    0CL39               trace data
+ZTRCCSMA DC    CL1'.'              -trace data
+ZTRCCSMB DC    CL1'.'              -trace data
+ZTRCCSMC DC    CL1'.'              -trace data
+ZTRCCSMD DC    CL1'.'              -trace data
+ZTRCCSME DC    CL1'.'              -trace data
+ZTRCCSMF DC    CL1'.'              -trace data
+ZTRCCSMG DC    CL1'.'              -trace data
+ZTRCCSMH DC    CL1'.'              -trace data
+ZTRCCSMI DC    CL1'.'              -trace data
+ZTRCCSMJ DC    CL1'.'              -trace data
+ZTRCCSMK DC    CL1'.'              -trace data
+ZTRCCSML DC    CL1'.'              -trace data
+ZTRCCSMM DC    CL1'.'              -trace data
+ZTRCCSMN DC    CL1'.'              -trace data
+ZTRCCSMO DC    CL1'.'              -trace data
+ZTRCCSMP DC    CL1'.'              -trace data
+ZTRCCSMQ DC    CL1'.'              -trace data
+ZTRCCSMR DC    CL1'.'              -trace data
+ZTRCCSMS DC    CL1'.'              -trace data
+ZTRCCSMT DC    CL1'.'              -trace data
+ZTRCCSMU DC    CL1'.'              -trace data
+ZTRCCSMV DC    CL1'.'              -trace data
+ZTRCCSMW DC    CL1'.'              -trace data
+ZTRCCSMX DC    CL1'.'              -trace data
+ZTRCCSMY DC    CL1'.'              -trace data
+ZTRCCSMZ DC    CL1'.'              -trace data
+ZTRCCSM0 DC    CL1'.'              -trace data
+ZTRCCSM1 DC    CL1'.'              -trace data
+ZTRCCSM2 DC    CL1'.'              -trace data
+ZTRCCSM3 DC    CL1'.'              -trace data
+ZTRCCSM4 DC    CL1'.'              -trace data
+ZTRCCSM5 DC    CL1'.'              -trace data
+ZTRCCSM6 DC    CL1'.'              -trace data
+ZTRCCSM7 DC    CL1'.'              -trace data
+ZTRCCSM8 DC    CL1'.'              -trace data
+ZTRCCSM9 DC    CL1'.'              -trace data
+ZTRCCSM$ DC    CL1'.'              -trace data
+ZTRCCSM# DC    CL1'.'              -trace data
+ZTRCCSM@ DC    CL1'.'              -trace data
+ZTRC@CSZ EQU   *-ZTRCCSTR          trace data size
+*
+**       DYN= Stand-alone trace data
+*
+ZTRCDYX1 DC    CL4'DYN='           trace ID
+ZTRCDYX2 DC    CL8'EMFCSM'         routine ID
+ZTRCDYTR DS    0CL39               trace data
+ZTRCDYNA DC    CL1'.'              -trace data
+ZTRCDYNB DC    CL1'.'              -trace data
+ZTRCDYNC DC    CL1'.'              -trace data
+ZTRCDYND DC    CL1'.'              -trace data
+ZTRCDYNE DC    CL1'.'              -trace data
+ZTRCDYNF DC    CL1'.'              -trace data
+ZTRCDYNG DC    CL1'.'              -trace data
+ZTRCDYNH DC    CL1'.'              -trace data
+ZTRCDYNI DC    CL1'.'              -trace data
+ZTRCDYNJ DC    CL1'.'              -trace data
+ZTRCDYNK DC    CL1'.'              -trace data
+ZTRCDYNL DC    CL1'.'              -trace data
+ZTRCDYNM DC    CL1'.'              -trace data
+ZTRCDYNN DC    CL1'.'              -trace data
+ZTRCDYNO DC    CL1'.'              -trace data
+ZTRCDYNP DC    CL1'.'              -trace data
+ZTRCDYNQ DC    CL1'.'              -trace data
+ZTRCDYNR DC    CL1'.'              -trace data
+ZTRCDYNS DC    CL1'.'              -trace data
+ZTRCDYNT DC    CL1'.'              -trace data
+ZTRCDYNU DC    CL1'.'              -trace data
+ZTRCDYNV DC    CL1'.'              -trace data
+ZTRCDYNW DC    CL1'.'              -trace data
+ZTRCDYNX DC    CL1'.'              -trace data
+ZTRCDYNY DC    CL1'.'              -trace data
+ZTRCDYNZ DC    CL1'.'              -trace data
+ZTRCDYN0 DC    CL1'.'              -trace data
+ZTRCDYN1 DC    CL1'.'              -trace data
+ZTRCDYN2 DC    CL1'.'              -trace data
+ZTRCDYN3 DC    CL1'.'              -trace data
+ZTRCDYN4 DC    CL1'.'              -trace data
+ZTRCDYN5 DC    CL1'.'              -trace data
+ZTRCDYN6 DC    CL1'.'              -trace data
+ZTRCDYN7 DC    CL1'.'              -trace data
+ZTRCDYN8 DC    CL1'.'              -trace data
+ZTRCDYN9 DC    CL1'.'              -trace data
+ZTRCDYN$ DC    CL1'.'              -trace data
+ZTRCDYN# DC    CL1'.'              -trace data
+ZTRCDYN@ DC    CL1'.'              -trace data
+ZTRC@DYZ EQU   *-ZTRCDYTR          trace data size
+*
+**       CMD= Stand-alone trace data
+*
+ZTRCCMX1 DC    CL4'CMD='           trace ID
+ZTRCCMX2 DC    CL8'EMFCMD'         routine ID
+ZTRCCMTR DS    0CL39               trace data
+ZTRCCMDA DC    CL1'.'              -trace data
+ZTRCCMDB DC    CL1'.'              -trace data
+ZTRCCMDC DC    CL1'.'              -trace data
+ZTRCCMDD DC    CL1'.'              -trace data
+ZTRCCMDE DC    CL1'.'              -trace data
+ZTRCCMDF DC    CL1'.'              -trace data
+ZTRCCMDG DC    CL1'.'              -trace data
+ZTRCCMDH DC    CL1'.'              -trace data
+ZTRCCMDI DC    CL1'.'              -trace data
+ZTRCCMDJ DC    CL1'.'              -trace data
+ZTRCCMDK DC    CL1'.'              -trace data
+ZTRCCMDL DC    CL1'.'              -trace data
+ZTRCCMDM DC    CL1'.'              -trace data
+ZTRCCMDN DC    CL1'.'              -trace data
+ZTRCCMDO DC    CL1'.'              -trace data
+ZTRCCMDP DC    CL1'.'              -trace data
+ZTRCCMDQ DC    CL1'.'              -trace data
+ZTRCCMDR DC    CL1'.'              -trace data
+ZTRCCMDS DC    CL1'.'              -trace data
+ZTRCCMDT DC    CL1'.'              -trace data
+ZTRCCMDU DC    CL1'.'              -trace data
+ZTRCCMDV DC    CL1'.'              -trace data
+ZTRCCMDW DC    CL1'.'              -trace data
+ZTRCCMDX DC    CL1'.'              -trace data
+ZTRCCMDY DC    CL1'.'              -trace data
+ZTRCCMDZ DC    CL1'.'              -trace data
+ZTRCCMD0 DC    CL1'.'              -trace data
+ZTRCCMD1 DC    CL1'.'              -trace data
+ZTRCCMD2 DC    CL1'.'              -trace data
+ZTRCCMD3 DC    CL1'.'              -trace data
+ZTRCCMD4 DC    CL1'.'              -trace data
+ZTRCCMD5 DC    CL1'.'              -trace data
+ZTRCCMD6 DC    CL1'.'              -trace data
+ZTRCCMD7 DC    CL1'.'              -trace data
+ZTRCCMD8 DC    CL1'.'              -trace data
+ZTRCCMD9 DC    CL1'.'              -trace data
+ZTRCCMD$ DC    CL1'.'              -trace data
+ZTRCCMD# DC    CL1'.'              -trace data
+ZTRCCMD@ DC    CL1'.'              -trace data
+ZTRC@CMZ EQU   *-ZTRCCMTR          trace data size
+*
+**       EOM= Stand-alone trace data
+*
+ZTRCEMX1 DC    CL4'EOM='           trace ID
+ZTRCEMX2 DC    CL8'EMFEOM'         routine ID
+ZTRCEMTR DS    0CL39               trace data
+ZTRCEOMA DC    CL1'.'              -trace data
+ZTRCEOMB DC    CL1'.'              -trace data
+ZTRCEOMC DC    CL1'.'              -trace data
+ZTRCEOMD DC    CL1'.'              -trace data
+ZTRCEOME DC    CL1'.'              -trace data
+ZTRCEOMF DC    CL1'.'              -trace data
+ZTRCEOMG DC    CL1'.'              -trace data
+ZTRCEOMH DC    CL1'.'              -trace data
+ZTRCEOMI DC    CL1'.'              -trace data
+ZTRCEOMJ DC    CL1'.'              -trace data
+ZTRCEOMK DC    CL1'.'              -trace data
+ZTRCEOML DC    CL1'.'              -trace data
+ZTRCEOMM DC    CL1'.'              -trace data
+ZTRCEOMN DC    CL1'.'              -trace data
+ZTRCEOMO DC    CL1'.'              -trace data
+ZTRCEOMP DC    CL1'.'              -trace data
+ZTRCEOMQ DC    CL1'.'              -trace data
+ZTRCEOMR DC    CL1'.'              -trace data
+ZTRCEOMS DC    CL1'.'              -trace data
+ZTRCEOMT DC    CL1'.'              -trace data
+ZTRCEOMU DC    CL1'.'              -trace data
+ZTRCEOMV DC    CL1'.'              -trace data
+ZTRCEOMW DC    CL1'.'              -trace data
+ZTRCEOMX DC    CL1'.'              -trace data
+ZTRCEOMY DC    CL1'.'              -trace data
+ZTRCEOMZ DC    CL1'.'              -trace data
+ZTRCEOM0 DC    CL1'.'              -trace data
+ZTRCEOM1 DC    CL1'.'              -trace data
+ZTRCEOM2 DC    CL1'.'              -trace data
+ZTRCEOM3 DC    CL1'.'              -trace data
+ZTRCEOM4 DC    CL1'.'              -trace data
+ZTRCEOM5 DC    CL1'.'              -trace data
+ZTRCEOM6 DC    CL1'.'              -trace data
+ZTRCEOM7 DC    CL1'.'              -trace data
+ZTRCEOM8 DC    CL1'.'              -trace data
+ZTRCEOM9 DC    CL1'.'              -trace data
+ZTRCEOM$ DC    CL1'.'              -trace data
+ZTRCEOM# DC    CL1'.'              -trace data
+ZTRCEOM@ DC    CL1'.'              -trace data
+ZTRC@EMZ EQU   *-ZTRCEMTR          trace data size
+*
+**       PAR= Stand-alone trace data
+*
+ZTRCPAX1 DC    CL4'PAR='           trace ID
+ZTRCPAX2 DC    CL8'EMFPAR'         routine ID
+ZTRCPATR DS    0CL39               trace data
+ZTRCPARA DC    CL1'.'              -trace data
+ZTRCPARB DC    CL1'.'              -trace data
+ZTRCPARC DC    CL1'.'              -trace data
+ZTRCPARD DC    CL1'.'              -trace data
+ZTRCPARE DC    CL1'.'              -trace data
+ZTRCPARF DC    CL1'.'              -trace data
+ZTRCPARG DC    CL1'.'              -trace data
+ZTRCPARH DC    CL1'.'              -trace data
+ZTRCPARI DC    CL1'.'              -trace data
+ZTRCPARJ DC    CL1'.'              -trace data
+ZTRCPARK DC    CL1'.'              -trace data
+ZTRCPARL DC    CL1'.'              -trace data
+ZTRCPARM DC    CL1'.'              -trace data
+ZTRCPARN DC    CL1'.'              -trace data
+ZTRCPARO DC    CL1'.'              -trace data
+ZTRCPARP DC    CL1'.'              -trace data
+ZTRCPARQ DC    CL1'.'              -trace data
+ZTRCPARR DC    CL1'.'              -trace data
+ZTRCPARS DC    CL1'.'              -trace data
+ZTRCPART DC    CL1'.'              -trace data
+ZTRCPARU DC    CL1'.'              -trace data
+ZTRCPARV DC    CL1'.'              -trace data
+ZTRCPARW DC    CL1'.'              -trace data
+ZTRCPARX DC    CL1'.'              -trace data
+ZTRCPARY DC    CL1'.'              -trace data
+ZTRCPARZ DC    CL1'.'              -trace data
+ZTRCPAR0 DC    CL1'.'              -trace data
+ZTRCPAR1 DC    CL1'.'              -trace data
+ZTRCPAR2 DC    CL1'.'              -trace data
+ZTRCPAR3 DC    CL1'.'              -trace data
+ZTRCPAR4 DC    CL1'.'              -trace data
+ZTRCPAR5 DC    CL1'.'              -trace data
+ZTRCPAR6 DC    CL1'.'              -trace data
+ZTRCPAR7 DC    CL1'.'              -trace data
+ZTRCPAR8 DC    CL1'.'              -trace data
+ZTRCPAR9 DC    CL1'.'              -trace data
+ZTRCPAR$ DC    CL1'.'              -trace data
+ZTRCPAR# DC    CL1'.'              -trace data
+ZTRCPAR@ DC    CL1'.'              -trace data
+ZTRC@PAZ EQU   *-ZTRCPATR          trace data size
+*
+**       LOC= Stand-alone trace data
+*
+ZTRCLOX1 DC    CL4'LOC='           trace ID
+ZTRCLOX2 DC    CL8'EMFXIT'         routine ID
+ZTRCLOTR DS    0CL39               trace data
+ZTRCLOCA DC    CL1'.'              -trace data
+ZTRCLOCB DC    CL1'.'              -trace data
+ZTRCLOCC DC    CL1'.'              -trace data
+ZTRCLOCD DC    CL1'.'              -trace data
+ZTRCLOCE DC    CL1'.'              -trace data
+ZTRCLOCF DC    CL1'.'              -trace data
+ZTRCLOCG DC    CL1'.'              -trace data
+ZTRCLOCH DC    CL1'.'              -trace data
+ZTRCLOCI DC    CL1'.'              -trace data
+ZTRCLOCJ DC    CL1'.'              -trace data
+ZTRCLOCK DC    CL1'.'              -trace data
+ZTRCLOCL DC    CL1'.'              -trace data
+ZTRCLOCM DC    CL1'.'              -trace data
+ZTRCLOCN DC    CL1'.'              -trace data
+ZTRCLOCO DC    CL1'.'              -trace data
+ZTRCLOCP DC    CL1'.'              -trace data
+ZTRCLOCQ DC    CL1'.'              -trace data
+ZTRCLOCR DC    CL1'.'              -trace data
+ZTRCLOCS DC    CL1'.'              -trace data
+ZTRCLOCT DC    CL1'.'              -trace data
+ZTRCLOCU DC    CL1'.'              -trace data
+ZTRCLOCV DC    CL1'.'              -trace data
+ZTRCLOCW DC    CL1'.'              -trace data
+ZTRCLOCX DC    CL1'.'              -trace data
+ZTRCLOCY DC    CL1'.'              -trace data
+ZTRCLOCZ DC    CL1'.'              -trace data
+ZTRCLOC0 DC    CL1'.'              -trace data
+ZTRCLOC1 DC    CL1'.'              -trace data
+ZTRCLOC2 DC    CL1'.'              -trace data
+ZTRCLOC3 DC    CL1'.'              -trace data
+ZTRCLOC4 DC    CL1'.'              -trace data
+ZTRCLOC5 DC    CL1'.'              -trace data
+ZTRCLOC6 DC    CL1'.'              -trace data
+ZTRCLOC7 DC    CL1'.'              -trace data
+ZTRCLOC8 DC    CL1'.'              -trace data
+ZTRCLOC9 DC    CL1'.'              -trace data
+ZTRCLOC$ DC    CL1'.'              -trace data
+ZTRCLOC# DC    CL1'.'              -trace data
+ZTRCLOC@ DC    CL1'.'              -trace data
+ZTRC@LOZ EQU   *-ZTRCLOTR          trace data size
+*
+**       JBP= Stand-alone trace data
+*
+ZTRCJBX1 DC    CL4'JBP='           trace ID
+ZTRCJBX2 DC    CL8'EMFXIT'         routine ID
+ZTRCJBTR DS    0CL39               trace data
+ZTRCJBPA DC    CL1'.'              -trace data
+ZTRCJBPB DC    CL1'.'              -trace data
+ZTRCJBPC DC    CL1'.'              -trace data
+ZTRCJBPD DC    CL1'.'              -trace data
+ZTRCJBPE DC    CL1'.'              -trace data
+ZTRCJBPF DC    CL1'.'              -trace data
+ZTRCJBPG DC    CL1'.'              -trace data
+ZTRCJBPH DC    CL1'.'              -trace data
+ZTRCJBPI DC    CL1'.'              -trace data
+ZTRCJBPJ DC    CL1'.'              -trace data
+ZTRCJBPK DC    CL1'.'              -trace data
+ZTRCJBPL DC    CL1'.'              -trace data
+ZTRCJBPM DC    CL1'.'              -trace data
+ZTRCJBPN DC    CL1'.'              -trace data
+ZTRCJBPO DC    CL1'.'              -trace data
+ZTRCJBPP DC    CL1'.'              -trace data
+ZTRCJBPQ DC    CL1'.'              -trace data
+ZTRCJBPR DC    CL1'.'              -trace data
+ZTRCJBPS DC    CL1'.'              -trace data
+ZTRCJBPT DC    CL1'.'              -trace data
+ZTRCJBPU DC    CL1'.'              -trace data
+ZTRCJBPV DC    CL1'.'              -trace data
+ZTRCJBPW DC    CL1'.'              -trace data
+ZTRCJBPX DC    CL1'.'              -trace data
+ZTRCJBPY DC    CL1'.'              -trace data
+ZTRCJBPZ DC    CL1'.'              -trace data
+ZTRCJBP0 DC    CL1'.'              -trace data
+ZTRCJBP1 DC    CL1'.'              -trace data
+ZTRCJBP2 DC    CL1'.'              -trace data
+ZTRCJBP3 DC    CL1'.'              -trace data
+ZTRCJBP4 DC    CL1'.'              -trace data
+ZTRCJBP5 DC    CL1'.'              -trace data
+ZTRCJBP6 DC    CL1'.'              -trace data
+ZTRCJBP7 DC    CL1'.'              -trace data
+ZTRCJBP8 DC    CL1'.'              -trace data
+ZTRCJBP9 DC    CL1'.'              -trace data
+ZTRCJBP$ DC    CL1'.'              -trace data
+ZTRCJBP# DC    CL1'.'              -trace data
+ZTRCJBP@ DC    CL1'.'              -trace data
+ZTRC@JBZ EQU   *-ZTRCJBTR          trace data size
+*
+**       AST= Stand-alone trace data
+*
+ZTRCASX1 DC    CL4'AST='           trace ID
+ZTRCASX2 DC    CL8'EMFXIT'         routine ID
+ZTRCASYR DS    0CL39               trace data
+ZTRCASTA DC    CL1'.'              -trace data
+ZTRCASTB DC    CL1'.'              -trace data
+ZTRCASTC DC    CL1'.'              -trace data
+ZTRCASTD DC    CL1'.'              -trace data
+ZTRCASTE DC    CL1'.'              -trace data
+ZTRCASTF DC    CL1'.'              -trace data
+ZTRCASTG DC    CL1'.'              -trace data
+ZTRCASTH DC    CL1'.'              -trace data
+ZTRCASTI DC    CL1'.'              -trace data
+ZTRCASTJ DC    CL1'.'              -trace data
+ZTRCASTK DC    CL1'.'              -trace data
+ZTRCASTL DC    CL1'.'              -trace data
+ZTRCASTM DC    CL1'.'              -trace data
+ZTRCASTN DC    CL1'.'              -trace data
+ZTRCASTO DC    CL1'.'              -trace data
+ZTRCASTP DC    CL1'.'              -trace data
+ZTRCASTQ DC    CL1'.'              -trace data
+ZTRCASTR DC    CL1'.'              -trace data
+ZTRCASTS DC    CL1'.'              -trace data
+ZTRCASTT DC    CL1'.'              -trace data
+ZTRCASTU DC    CL1'.'              -trace data
+ZTRCASTV DC    CL1'.'              -trace data
+ZTRCASTW DC    CL1'.'              -trace data
+ZTRCASTX DC    CL1'.'              -trace data
+ZTRCASTY DC    CL1'.'              -trace data
+ZTRCASTZ DC    CL1'.'              -trace data
+ZTRCAST0 DC    CL1'.'              -trace data
+ZTRCAST1 DC    CL1'.'              -trace data
+ZTRCAST2 DC    CL1'.'              -trace data
+ZTRCAST3 DC    CL1'.'              -trace data
+ZTRCAST4 DC    CL1'.'              -trace data
+ZTRCAST5 DC    CL1'.'              -trace data
+ZTRCAST6 DC    CL1'.'              -trace data
+ZTRCAST7 DC    CL1'.'              -trace data
+ZTRCAST8 DC    CL1'.'              -trace data
+ZTRCAST9 DC    CL1'.'              -trace data
+ZTRCAST$ DC    CL1'.'              -trace data
+ZTRCAST# DC    CL1'.'              -trace data
+ZTRCAST@ DC    CL1'.'              -trace data
+ZTRC@ASZ EQU   *-ZTRCASYR          trace data size
+*
+**       JMR= Stand-alone trace data
+*
+ZTRCJMX1 DC    CL4'JMR='           trace ID
+ZTRCJMX2 DC    CL8'EMFXIT'         routine ID
+ZTRCJMTR DS    0CL39               trace data
+ZTRCJMRA DC    CL1'.'              -trace data
+ZTRCJMRB DC    CL1'.'              -trace data
+ZTRCJMRC DC    CL1'.'              -trace data
+ZTRCJMRD DC    CL1'.'              -trace data
+ZTRCJMRE DC    CL1'.'              -trace data
+ZTRCJMRF DC    CL1'.'              -trace data
+ZTRCJMRG DC    CL1'.'              -trace data
+ZTRCJMRH DC    CL1'.'              -trace data
+ZTRCJMRI DC    CL1'.'              -trace data
+ZTRCJMRJ DC    CL1'.'              -trace data
+ZTRCJMRK DC    CL1'.'              -trace data
+ZTRCJMRL DC    CL1'.'              -trace data
+ZTRCJMRM DC    CL1'.'              -trace data
+ZTRCJMRN DC    CL1'.'              -trace data
+ZTRCJMRO DC    CL1'.'              -trace data
+ZTRCJMRP DC    CL1'.'              -trace data
+ZTRCJMRQ DC    CL1'.'              -trace data
+ZTRCJMRR DC    CL1'.'              -trace data
+ZTRCJMRS DC    CL1'.'              -trace data
+ZTRCJMRT DC    CL1'.'              -trace data
+ZTRCJMRU DC    CL1'.'              -trace data
+ZTRCJMRV DC    CL1'.'              -trace data
+ZTRCJMRW DC    CL1'.'              -trace data
+ZTRCJMRX DC    CL1'.'              -trace data
+ZTRCJMRY DC    CL1'.'              -trace data
+ZTRCJMRZ DC    CL1'.'              -trace data
+ZTRCJMR0 DC    CL1'.'              -trace data
+ZTRCJMR1 DC    CL1'.'              -trace data
+ZTRCJMR2 DC    CL1'.'              -trace data
+ZTRCJMR3 DC    CL1'.'              -trace data
+ZTRCJMR4 DC    CL1'.'              -trace data
+ZTRCJMR5 DC    CL1'.'              -trace data
+ZTRCJMR6 DC    CL1'.'              -trace data
+ZTRCJMR7 DC    CL1'.'              -trace data
+ZTRCJMR8 DC    CL1'.'              -trace data
+ZTRCJMR9 DC    CL1'.'              -trace data
+ZTRCJMR$ DC    CL1'.'              -trace data
+ZTRCJMR# DC    CL1'.'              -trace data
+ZTRCJMR@ DC    CL1'.'              -trace data
+ZTRC@JMZ EQU   *-ZTRCJMTR          trace data size
+*
+**       XIT= Stand-alone trace data
+*
+ZTRCXIX1 DC    CL4'XIT='           trace ID
+ZTRCXIX2 DC    CL8'EMFXIT'         routine ID
+ZTRCXIIR DS    0CL39               trace data
+ZTRCXITA DC    CL1'.'              -trace data
+ZTRCXITB DC    CL1'.'              -trace data
+ZTRCXITC DC    CL1'.'              -trace data
+ZTRCXITD DC    CL1'.'              -trace data
+ZTRCXITE DC    CL1'.'              -trace data
+ZTRCXITF DC    CL1'.'              -trace data
+ZTRCXITG DC    CL1'.'              -trace data
+ZTRCXITH DC    CL1'.'              -trace data
+ZTRCXITI DC    CL1'.'              -trace data
+ZTRCXITJ DC    CL1'.'              -trace data
+ZTRCXITK DC    CL1'.'              -trace data
+ZTRCXITL DC    CL1'.'              -trace data
+ZTRCXITM DC    CL1'.'              -trace data
+ZTRCXITN DC    CL1'.'              -trace data
+ZTRCXITO DC    CL1'.'              -trace data
+ZTRCXITP DC    CL1'.'              -trace data
+ZTRCXITQ DC    CL1'.'              -trace data
+ZTRCXITR DC    CL1'.'              -trace data
+ZTRCXITS DC    CL1'.'              -trace data
+ZTRCXITT DC    CL1'.'              -trace data
+ZTRCXITU DC    CL1'.'              -trace data
+ZTRCXITV DC    CL1'.'              -trace data
+ZTRCXITW DC    CL1'.'              -trace data
+ZTRCXITX DC    CL1'.'              -trace data
+ZTRCXITY DC    CL1'.'              -trace data
+ZTRCXITZ DC    CL1'.'              -trace data
+ZTRCXIT0 DC    CL1'.'              -trace data
+ZTRCXIT1 DC    CL1'.'              -trace data
+ZTRCXIT2 DC    CL1'.'              -trace data
+ZTRCXIT3 DC    CL1'.'              -trace data
+ZTRCXIT4 DC    CL1'.'              -trace data
+ZTRCXIT5 DC    CL1'.'              -trace data
+ZTRCXIT6 DC    CL1'.'              -trace data
+ZTRCXIT7 DC    CL1'.'              -trace data
+ZTRCXIT8 DC    CL1'.'              -trace data
+ZTRCXIT9 DC    CL1'.'              -trace data
+ZTRCXIT$ DC    CL1'.'              -trace data
+ZTRCXIT# DC    CL1'.'              -trace data
+ZTRCXIT@ DC    CL1'.'              -trace data
+ZTRC@XIZ EQU   *-ZTRCXIIR          trace data size
+*
+**       UTL= Stand-alone trace data
+*
+ZTRCUTX1 DC    CL4'UTL='           trace ID
+ZTRCUTX2 DC    CL8'IEFUTL'         routine ID
+ZTRCUTIR DS    0CL39               trace data
+ZTRCUTLA DC    CL1'.'              -trace data
+ZTRCUTLB DC    CL1'.'              -trace data
+ZTRCUTLC DC    CL1'.'              -trace data
+ZTRCUTLD DC    CL1'.'              -trace data
+ZTRCUTLE DC    CL1'.'              -trace data
+ZTRCUTLF DC    CL1'.'              -trace data
+ZTRCUTLG DC    CL1'.'              -trace data
+ZTRCUTLH DC    CL1'.'              -trace data
+ZTRCUTLI DC    CL1'.'              -trace data
+ZTRCUTLJ DC    CL1'.'              -trace data
+ZTRCUTLK DC    CL1'.'              -trace data
+ZTRCUTLL DC    CL1'.'              -trace data
+ZTRCUTLM DC    CL1'.'              -trace data
+ZTRCUTLN DC    CL1'.'              -trace data
+ZTRCUTLO DC    CL1'.'              -trace data
+ZTRCUTLP DC    CL1'.'              -trace data
+ZTRCUTLQ DC    CL1'.'              -trace data
+ZTRCUTLR DC    CL1'.'              -trace data
+ZTRCUTLS DC    CL1'.'              -trace data
+ZTRCUTLT DC    CL1'.'              -trace data
+ZTRCUTLU DC    CL1'.'              -trace data
+ZTRCUTLV DC    CL1'.'              -trace data
+ZTRCUTLW DC    CL1'.'              -trace data
+ZTRCUTLX DC    CL1'.'              -trace data
+ZTRCUTLY DC    CL1'.'              -trace data
+ZTRCUTLZ DC    CL1'.'              -trace data
+ZTRCUTL0 DC    CL1'.'              -trace data
+ZTRCUTL1 DC    CL1'.'              -trace data
+ZTRCUTL2 DC    CL1'.'              -trace data
+ZTRCUTL3 DC    CL1'.'              -trace data
+ZTRCUTL4 DC    CL1'.'              -trace data
+ZTRCUTL5 DC    CL1'.'              -trace data
+ZTRCUTL6 DC    CL1'.'              -trace data
+ZTRCUTL7 DC    CL1'.'              -trace data
+ZTRCUTL8 DC    CL1'.'              -trace data
+ZTRCUTL9 DC    CL1'.'              -trace data
+ZTRCUTL$ DC    CL1'.'              -trace data
+ZTRCUTL# DC    CL1'.'              -trace data
+ZTRCUTL@ DC    CL1'.'              -trace data
+ZTRC@UTZ EQU   *-ZTRCUTIR          trace data size
+*
+**       USO= Stand-alone trace data
+*
+ZTRCUSX1 DC    CL4'USO='           trace ID
+ZTRCUSX2 DC    CL8'IEFUSO'         routine ID
+ZTRCUSIR DS    0CL39               trace data
+ZTRCUSOA DC    CL1'.'              -trace data
+ZTRCUSOB DC    CL1'.'              -trace data
+ZTRCUSOC DC    CL1'.'              -trace data
+ZTRCUSOD DC    CL1'.'              -trace data
+ZTRCUSOE DC    CL1'.'              -trace data
+ZTRCUSOF DC    CL1'.'              -trace data
+ZTRCUSOG DC    CL1'.'              -trace data
+ZTRCUSOH DC    CL1'.'              -trace data
+ZTRCUSOI DC    CL1'.'              -trace data
+ZTRCUSOJ DC    CL1'.'              -trace data
+ZTRCUSOK DC    CL1'.'              -trace data
+ZTRCUSOL DC    CL1'.'              -trace data
+ZTRCUSOM DC    CL1'.'              -trace data
+ZTRCUSON DC    CL1'.'              -trace data
+ZTRCUSOO DC    CL1'.'              -trace data
+ZTRCUSOP DC    CL1'.'              -trace data
+ZTRCUSOQ DC    CL1'.'              -trace data
+ZTRCUSOR DC    CL1'.'              -trace data
+ZTRCUSOS DC    CL1'.'              -trace data
+ZTRCUSOT DC    CL1'.'              -trace data
+ZTRCUSOU DC    CL1'.'              -trace data
+ZTRCUSOV DC    CL1'.'              -trace data
+ZTRCUSOW DC    CL1'.'              -trace data
+ZTRCUSOX DC    CL1'.'              -trace data
+ZTRCUSOY DC    CL1'.'              -trace data
+ZTRCUSOZ DC    CL1'.'              -trace data
+ZTRCUSO0 DC    CL1'.'              -trace data
+ZTRCUSO1 DC    CL1'.'              -trace data
+ZTRCUSO2 DC    CL1'.'              -trace data
+ZTRCUSO3 DC    CL1'.'              -trace data
+ZTRCUSO4 DC    CL1'.'              -trace data
+ZTRCUSO5 DC    CL1'.'              -trace data
+ZTRCUSO6 DC    CL1'.'              -trace data
+ZTRCUSO7 DC    CL1'.'              -trace data
+ZTRCUSO8 DC    CL1'.'              -trace data
+ZTRCUSO9 DC    CL1'.'              -trace data
+ZTRCUSO$ DC    CL1'.'              -trace data
+ZTRCUSO# DC    CL1'.'              -trace data
+ZTRCUSO@ DC    CL1'.'              -trace data
+ZTRC@USZ EQU   *-ZTRCUSIR          trace data size
+*
+**       UJP= Stand-alone trace data
+*
+ZTRCUJX1 DC    CL4'UJP='           trace ID
+ZTRCUJX2 DC    CL8'IEFUJP'         routine ID
+ZTRCUJIR DS    0CL39               trace data
+ZTRCUJPA DC    CL1'.'              -trace data
+ZTRCUJPB DC    CL1'.'              -trace data
+ZTRCUJPC DC    CL1'.'              -trace data
+ZTRCUJPD DC    CL1'.'              -trace data
+ZTRCUJPE DC    CL1'.'              -trace data
+ZTRCUJPF DC    CL1'.'              -trace data
+ZTRCUJPG DC    CL1'.'              -trace data
+ZTRCUJPH DC    CL1'.'              -trace data
+ZTRCUJPI DC    CL1'.'              -trace data
+ZTRCUJPJ DC    CL1'.'              -trace data
+ZTRCUJPK DC    CL1'.'              -trace data
+ZTRCUJPL DC    CL1'.'              -trace data
+ZTRCUJPM DC    CL1'.'              -trace data
+ZTRCUJPN DC    CL1'.'              -trace data
+ZTRCUJPO DC    CL1'.'              -trace data
+ZTRCUJPP DC    CL1'.'              -trace data
+ZTRCUJPQ DC    CL1'.'              -trace data
+ZTRCUJPR DC    CL1'.'              -trace data
+ZTRCUJPS DC    CL1'.'              -trace data
+ZTRCUJPT DC    CL1'.'              -trace data
+ZTRCUJPU DC    CL1'.'              -trace data
+ZTRCUJPV DC    CL1'.'              -trace data
+ZTRCUJPW DC    CL1'.'              -trace data
+ZTRCUJPX DC    CL1'.'              -trace data
+ZTRCUJPY DC    CL1'.'              -trace data
+ZTRCUJPZ DC    CL1'.'              -trace data
+ZTRCUJP0 DC    CL1'.'              -trace data
+ZTRCUJP1 DC    CL1'.'              -trace data
+ZTRCUJP2 DC    CL1'.'              -trace data
+ZTRCUJP3 DC    CL1'.'              -trace data
+ZTRCUJP4 DC    CL1'.'              -trace data
+ZTRCUJP5 DC    CL1'.'              -trace data
+ZTRCUJP6 DC    CL1'.'              -trace data
+ZTRCUJP7 DC    CL1'.'              -trace data
+ZTRCUJP8 DC    CL1'.'              -trace data
+ZTRCUJP9 DC    CL1'.'              -trace data
+ZTRCUJP$ DC    CL1'.'              -trace data
+ZTRCUJP# DC    CL1'.'              -trace data
+ZTRCUJP@ DC    CL1'.'              -trace data
+ZTRC@UJZ EQU   *-ZTRCUJIR          trace data size
+*
+**       U29= Stand-alone trace data
+*
+ZTRCU9X1 DC    CL4'U29='           trace ID
+ZTRCU9X2 DC    CL8'IEFU29'         routine ID
+ZTRCU9IR DS    0CL39               trace data
+ZTRCU29A DC    CL1'.'              -trace data
+ZTRCU29B DC    CL1'.'              -trace data
+ZTRCU29C DC    CL1'.'              -trace data
+ZTRCU29D DC    CL1'.'              -trace data
+ZTRCU29E DC    CL1'.'              -trace data
+ZTRCU29F DC    CL1'.'              -trace data
+ZTRCU29G DC    CL1'.'              -trace data
+ZTRCU29H DC    CL1'.'              -trace data
+ZTRCU29I DC    CL1'.'              -trace data
+ZTRCU29J DC    CL1'.'              -trace data
+ZTRCU29K DC    CL1'.'              -trace data
+ZTRCU29L DC    CL1'.'              -trace data
+ZTRCU29M DC    CL1'.'              -trace data
+ZTRCU29N DC    CL1'.'              -trace data
+ZTRCU29O DC    CL1'.'              -trace data
+ZTRCU29P DC    CL1'.'              -trace data
+ZTRCU29Q DC    CL1'.'              -trace data
+ZTRCU29R DC    CL1'.'              -trace data
+ZTRCU29S DC    CL1'.'              -trace data
+ZTRCU29T DC    CL1'.'              -trace data
+ZTRCU29U DC    CL1'.'              -trace data
+ZTRCU29V DC    CL1'.'              -trace data
+ZTRCU29W DC    CL1'.'              -trace data
+ZTRCU29X DC    CL1'.'              -trace data
+ZTRCU29Y DC    CL1'.'              -trace data
+ZTRCU29Z DC    CL1'.'              -trace data
+ZTRCU290 DC    CL1'.'              -trace data
+ZTRCU291 DC    CL1'.'              -trace data
+ZTRCU292 DC    CL1'.'              -trace data
+ZTRCU293 DC    CL1'.'              -trace data
+ZTRCU294 DC    CL1'.'              -trace data
+ZTRCU295 DC    CL1'.'              -trace data
+ZTRCU296 DC    CL1'.'              -trace data
+ZTRCU297 DC    CL1'.'              -trace data
+ZTRCU298 DC    CL1'.'              -trace data
+ZTRCU299 DC    CL1'.'              -trace data
+ZTRCU29$ DC    CL1'.'              -trace data
+ZTRCU29# DC    CL1'.'              -trace data
+ZTRCU29@ DC    CL1'.'              -trace data
+ZTRC@U9Z EQU   *-ZTRCU9IR          trace data size
+*
+**       29L= Stand-alone trace data
+*
+ZTRC29X1 DC    CL4'29L='           trace ID
+ZTRC29X2 DC    CL8'IEF29L'         routine ID
+ZTRC29IR DS    0CL39               trace data
+ZTRC29LA DC    CL1'.'              -trace data
+ZTRC29LB DC    CL1'.'              -trace data
+ZTRC29LC DC    CL1'.'              -trace data
+ZTRC29LD DC    CL1'.'              -trace data
+ZTRC29LE DC    CL1'.'              -trace data
+ZTRC29LF DC    CL1'.'              -trace data
+ZTRC29LG DC    CL1'.'              -trace data
+ZTRC29LH DC    CL1'.'              -trace data
+ZTRC29LI DC    CL1'.'              -trace data
+ZTRC29LJ DC    CL1'.'              -trace data
+ZTRC29LK DC    CL1'.'              -trace data
+ZTRC29LL DC    CL1'.'              -trace data
+ZTRC29LM DC    CL1'.'              -trace data
+ZTRC29LN DC    CL1'.'              -trace data
+ZTRC29LO DC    CL1'.'              -trace data
+ZTRC29LP DC    CL1'.'              -trace data
+ZTRC29LQ DC    CL1'.'              -trace data
+ZTRC29LR DC    CL1'.'              -trace data
+ZTRC29LS DC    CL1'.'              -trace data
+ZTRC29LT DC    CL1'.'              -trace data
+ZTRC29LU DC    CL1'.'              -trace data
+ZTRC29LV DC    CL1'.'              -trace data
+ZTRC29LW DC    CL1'.'              -trace data
+ZTRC29LX DC    CL1'.'              -trace data
+ZTRC29LY DC    CL1'.'              -trace data
+ZTRC29LZ DC    CL1'.'              -trace data
+ZTRC29L0 DC    CL1'.'              -trace data
+ZTRC29L1 DC    CL1'.'              -trace data
+ZTRC29L2 DC    CL1'.'              -trace data
+ZTRC29L3 DC    CL1'.'              -trace data
+ZTRC29L4 DC    CL1'.'              -trace data
+ZTRC29L5 DC    CL1'.'              -trace data
+ZTRC29L6 DC    CL1'.'              -trace data
+ZTRC29L7 DC    CL1'.'              -trace data
+ZTRC29L8 DC    CL1'.'              -trace data
+ZTRC29L9 DC    CL1'.'              -trace data
+ZTRC29L$ DC    CL1'.'              -trace data
+ZTRC29L# DC    CL1'.'              -trace data
+ZTRC29L@ DC    CL1'.'              -trace data
+ZTRC@29Z EQU   *-ZTRC29IR          trace data size
+*
+**       P83= Stand-alone trace data
+*
+ZTRCP3X1 DC    CL4'P83='           trace ID
+ZTRCP3X2 DC    CL8'EMFPAR'         routine ID
+ZTRCP3IR DS    0CL39               trace data
+ZTRCP83A DC    CL1'.'              -trace data
+ZTRCP83B DC    CL1'.'              -trace data
+ZTRCP83C DC    CL1'.'              -trace data
+ZTRCP83D DC    CL1'.'              -trace data
+ZTRCP83E DC    CL1'.'              -trace data
+ZTRCP83F DC    CL1'.'              -trace data
+ZTRCP83G DC    CL1'.'              -trace data
+ZTRCP83H DC    CL1'.'              -trace data
+ZTRCP83I DC    CL1'.'              -trace data
+ZTRCP83J DC    CL1'.'              -trace data
+ZTRCP83K DC    CL1'.'              -trace data
+ZTRCP83L DC    CL1'.'              -trace data
+ZTRCP83M DC    CL1'.'              -trace data
+ZTRCP83N DC    CL1'.'              -trace data
+ZTRCP83O DC    CL1'.'              -trace data
+ZTRCP83P DC    CL1'.'              -trace data
+ZTRCP83Q DC    CL1'.'              -trace data
+ZTRCP83R DC    CL1'.'              -trace data
+ZTRCP83S DC    CL1'.'              -trace data
+ZTRCP83T DC    CL1'.'              -trace data
+ZTRCP83U DC    CL1'.'              -trace data
+ZTRCP83V DC    CL1'.'              -trace data
+ZTRCP83W DC    CL1'.'              -trace data
+ZTRCP83X DC    CL1'.'              -trace data
+ZTRCP83Y DC    CL1'.'              -trace data
+ZTRCP83Z DC    CL1'.'              -trace data
+ZTRCP830 DC    CL1'.'              -trace data
+ZTRCP831 DC    CL1'.'              -trace data
+ZTRCP832 DC    CL1'.'              -trace data
+ZTRCP833 DC    CL1'.'              -trace data
+ZTRCP834 DC    CL1'.'              -trace data
+ZTRCP835 DC    CL1'.'              -trace data
+ZTRCP836 DC    CL1'.'              -trace data
+ZTRCP837 DC    CL1'.'              -trace data
+ZTRCP838 DC    CL1'.'              -trace data
+ZTRCP839 DC    CL1'.'              -trace data
+ZTRCP83$ DC    CL1'.'              -trace data
+ZTRCP83# DC    CL1'.'              -trace data
+ZTRCP83@ DC    CL1'.'              -trace data
+ZTRC@P3Z EQU   *-ZTRCP3IR          trace data size
+*
+**       P84= Stand-alone trace data
+*
+ZTRCP4X1 DC    CL4'P84='           trace ID
+ZTRCP4X2 DC    CL8'EMFPAR'         routine ID
+ZTRCP4IR DS    0CL39               trace data
+ZTRCP84A DC    CL1'.'              -trace data
+ZTRCP84B DC    CL1'.'              -trace data
+ZTRCP84C DC    CL1'.'              -trace data
+ZTRCP84D DC    CL1'.'              -trace data
+ZTRCP84E DC    CL1'.'              -trace data
+ZTRCP84F DC    CL1'.'              -trace data
+ZTRCP84G DC    CL1'.'              -trace data
+ZTRCP84H DC    CL1'.'              -trace data
+ZTRCP84I DC    CL1'.'              -trace data
+ZTRCP84J DC    CL1'.'              -trace data
+ZTRCP84K DC    CL1'.'              -trace data
+ZTRCP84L DC    CL1'.'              -trace data
+ZTRCP84M DC    CL1'.'              -trace data
+ZTRCP84N DC    CL1'.'              -trace data
+ZTRCP84O DC    CL1'.'              -trace data
+ZTRCP84P DC    CL1'.'              -trace data
+ZTRCP84Q DC    CL1'.'              -trace data
+ZTRCP84R DC    CL1'.'              -trace data
+ZTRCP84S DC    CL1'.'              -trace data
+ZTRCP84T DC    CL1'.'              -trace data
+ZTRCP84U DC    CL1'.'              -trace data
+ZTRCP84V DC    CL1'.'              -trace data
+ZTRCP84W DC    CL1'.'              -trace data
+ZTRCP84X DC    CL1'.'              -trace data
+ZTRCP84Y DC    CL1'.'              -trace data
+ZTRCP84Z DC    CL1'.'              -trace data
+ZTRCP840 DC    CL1'.'              -trace data
+ZTRCP841 DC    CL1'.'              -trace data
+ZTRCP842 DC    CL1'.'              -trace data
+ZTRCP843 DC    CL1'.'              -trace data
+ZTRCP844 DC    CL1'.'              -trace data
+ZTRCP845 DC    CL1'.'              -trace data
+ZTRCP846 DC    CL1'.'              -trace data
+ZTRCP847 DC    CL1'.'              -trace data
+ZTRCP848 DC    CL1'.'              -trace data
+ZTRCP849 DC    CL1'.'              -trace data
+ZTRCP84$ DC    CL1'.'              -trace data
+ZTRCP84# DC    CL1'.'              -trace data
+ZTRCP84@ DC    CL1'.'              -trace data
+ZTRC@P4Z EQU   *-ZTRCP4IR          trace data size
+*
+**       P85= Stand-alone trace data
+*
+ZTRCP5X1 DC    CL4'P85='           trace ID
+ZTRCP5X2 DC    CL8'EMFPAR'         routine ID
+ZTRCP5IR DS    0CL39               trace data
+ZTRCP85A DC    CL1'.'              -trace data
+ZTRCP85B DC    CL1'.'              -trace data
+ZTRCP85C DC    CL1'.'              -trace data
+ZTRCP85D DC    CL1'.'              -trace data
+ZTRCP85E DC    CL1'.'              -trace data
+ZTRCP85F DC    CL1'.'              -trace data
+ZTRCP85G DC    CL1'.'              -trace data
+ZTRCP85H DC    CL1'.'              -trace data
+ZTRCP85I DC    CL1'.'              -trace data
+ZTRCP85J DC    CL1'.'              -trace data
+ZTRCP85K DC    CL1'.'              -trace data
+ZTRCP85L DC    CL1'.'              -trace data
+ZTRCP85M DC    CL1'.'              -trace data
+ZTRCP85N DC    CL1'.'              -trace data
+ZTRCP85O DC    CL1'.'              -trace data
+ZTRCP85P DC    CL1'.'              -trace data
+ZTRCP85Q DC    CL1'.'              -trace data
+ZTRCP85R DC    CL1'.'              -trace data
+ZTRCP85S DC    CL1'.'              -trace data
+ZTRCP85T DC    CL1'.'              -trace data
+ZTRCP85U DC    CL1'.'              -trace data
+ZTRCP85V DC    CL1'.'              -trace data
+ZTRCP85W DC    CL1'.'              -trace data
+ZTRCP85X DC    CL1'.'              -trace data
+ZTRCP85Y DC    CL1'.'              -trace data
+ZTRCP85Z DC    CL1'.'              -trace data
+ZTRCP850 DC    CL1'.'              -trace data
+ZTRCP851 DC    CL1'.'              -trace data
+ZTRCP852 DC    CL1'.'              -trace data
+ZTRCP853 DC    CL1'.'              -trace data
+ZTRCP854 DC    CL1'.'              -trace data
+ZTRCP855 DC    CL1'.'              -trace data
+ZTRCP856 DC    CL1'.'              -trace data
+ZTRCP857 DC    CL1'.'              -trace data
+ZTRCP858 DC    CL1'.'              -trace data
+ZTRCP859 DC    CL1'.'              -trace data
+ZTRCP85$ DC    CL1'.'              -trace data
+ZTRCP85# DC    CL1'.'              -trace data
+ZTRCP85@ DC    CL1'.'              -trace data
+ZTRC@P5Z EQU   *-ZTRCP5IR          trace data size
+*
+**       P86= Stand-alone trace data
+*
+ZTRCP6X1 DC    CL4'P86='           trace ID
+ZTRCP6X2 DC    CL8'EMFPAR'         routine ID
+ZTRCP6IR DS    0CL39               trace data
+ZTRCP86A DC    CL1'.'              -trace data
+ZTRCP86B DC    CL1'.'              -trace data
+ZTRCP86C DC    CL1'.'              -trace data
+ZTRCP86D DC    CL1'.'              -trace data
+ZTRCP86E DC    CL1'.'              -trace data
+ZTRCP86F DC    CL1'.'              -trace data
+ZTRCP86G DC    CL1'.'              -trace data
+ZTRCP86H DC    CL1'.'              -trace data
+ZTRCP86I DC    CL1'.'              -trace data
+ZTRCP86J DC    CL1'.'              -trace data
+ZTRCP86K DC    CL1'.'              -trace data
+ZTRCP86L DC    CL1'.'              -trace data
+ZTRCP86M DC    CL1'.'              -trace data
+ZTRCP86N DC    CL1'.'              -trace data
+ZTRCP86O DC    CL1'.'              -trace data
+ZTRCP86P DC    CL1'.'              -trace data
+ZTRCP86Q DC    CL1'.'              -trace data
+ZTRCP86R DC    CL1'.'              -trace data
+ZTRCP86S DC    CL1'.'              -trace data
+ZTRCP86T DC    CL1'.'              -trace data
+ZTRCP86U DC    CL1'.'              -trace data
+ZTRCP86V DC    CL1'.'              -trace data
+ZTRCP86W DC    CL1'.'              -trace data
+ZTRCP86X DC    CL1'.'              -trace data
+ZTRCP86Y DC    CL1'.'              -trace data
+ZTRCP86Z DC    CL1'.'              -trace data
+ZTRCP860 DC    CL1'.'              -trace data
+ZTRCP861 DC    CL1'.'              -trace data
+ZTRCP862 DC    CL1'.'              -trace data
+ZTRCP863 DC    CL1'.'              -trace data
+ZTRCP864 DC    CL1'.'              -trace data
+ZTRCP865 DC    CL1'.'              -trace data
+ZTRCP866 DC    CL1'.'              -trace data
+ZTRCP867 DC    CL1'.'              -trace data
+ZTRCP868 DC    CL1'.'              -trace data
+ZTRCP869 DC    CL1'.'              -trace data
+ZTRCP86$ DC    CL1'.'              -trace data
+ZTRCP86# DC    CL1'.'              -trace data
+ZTRCP86@ DC    CL1'.'              -trace data
+ZTRC@P6Z EQU   *-ZTRCP6IR          trace data size
+*
+**       U83= Stand-alone trace data
+*
+ZTRC83X1 DC    CL4'U83='           trace ID
+ZTRC83X2 DC    CL8'EMFXIT'         routine ID
+ZTRC83IR DS    0CL39               trace data
+ZTRCU83A DC    CL1'.'              -trace data
+ZTRCU83B DC    CL1'.'              -trace data
+ZTRCU83C DC    CL1'.'              -trace data
+ZTRCU83D DC    CL1'.'              -trace data
+ZTRCU83E DC    CL1'.'              -trace data
+ZTRCU83F DC    CL1'.'              -trace data
+ZTRCU83G DC    CL1'.'              -trace data
+ZTRCU83H DC    CL1'.'              -trace data
+ZTRCU83I DC    CL1'.'              -trace data
+ZTRCU83J DC    CL1'.'              -trace data
+ZTRCU83K DC    CL1'.'              -trace data
+ZTRCU83L DC    CL1'.'              -trace data
+ZTRCU83M DC    CL1'.'              -trace data
+ZTRCU83N DC    CL1'.'              -trace data
+ZTRCU83O DC    CL1'.'              -trace data
+ZTRCU83P DC    CL1'.'              -trace data
+ZTRCU83Q DC    CL1'.'              -trace data
+ZTRCU83R DC    CL1'.'              -trace data
+ZTRCU83S DC    CL1'.'              -trace data
+ZTRCU83T DC    CL1'.'              -trace data
+ZTRCU83U DC    CL1'.'              -trace data
+ZTRCU83V DC    CL1'.'              -trace data
+ZTRCU83W DC    CL1'.'              -trace data
+ZTRCU83X DC    CL1'.'              -trace data
+ZTRCU83Y DC    CL1'.'              -trace data
+ZTRCU83Z DC    CL1'.'              -trace data
+ZTRCU830 DC    CL1'.'              -trace data
+ZTRCU831 DC    CL1'.'              -trace data
+ZTRCU832 DC    CL1'.'              -trace data
+ZTRCU833 DC    CL1'.'              -trace data
+ZTRCU834 DC    CL1'.'              -trace data
+ZTRCU835 DC    CL1'.'              -trace data
+ZTRCU836 DC    CL1'.'              -trace data
+ZTRCU837 DC    CL1'.'              -trace data
+ZTRCU838 DC    CL1'.'              -trace data
+ZTRCU839 DC    CL1'.'              -trace data
+ZTRCU83$ DC    CL1'.'              -trace data
+ZTRCU83# DC    CL1'.'              -trace data
+ZTRCU83@ DC    CL1'.'              -trace data
+ZTRC@83Z EQU   *-ZTRC83IR          trace data size
+*
+**       U84= Stand-alone trace data
+*
+ZTRC84X1 DC    CL4'U84='           trace ID
+ZTRC84X2 DC    CL8'EMFXIT'         routine ID
+ZTRC84IR DS    0CL39               trace data
+ZTRCU84A DC    CL1'.'              -trace data
+ZTRCU84B DC    CL1'.'              -trace data
+ZTRCU84C DC    CL1'.'              -trace data
+ZTRCU84D DC    CL1'.'              -trace data
+ZTRCU84E DC    CL1'.'              -trace data
+ZTRCU84F DC    CL1'.'              -trace data
+ZTRCU84G DC    CL1'.'              -trace data
+ZTRCU84H DC    CL1'.'              -trace data
+ZTRCU84I DC    CL1'.'              -trace data
+ZTRCU84J DC    CL1'.'              -trace data
+ZTRCU84K DC    CL1'.'              -trace data
+ZTRCU84L DC    CL1'.'              -trace data
+ZTRCU84M DC    CL1'.'              -trace data
+ZTRCU84N DC    CL1'.'              -trace data
+ZTRCU84O DC    CL1'.'              -trace data
+ZTRCU84P DC    CL1'.'              -trace data
+ZTRCU84Q DC    CL1'.'              -trace data
+ZTRCU84R DC    CL1'.'              -trace data
+ZTRCU84S DC    CL1'.'              -trace data
+ZTRCU84T DC    CL1'.'              -trace data
+ZTRCU84U DC    CL1'.'              -trace data
+ZTRCU84V DC    CL1'.'              -trace data
+ZTRCU84W DC    CL1'.'              -trace data
+ZTRCU84X DC    CL1'.'              -trace data
+ZTRCU84Y DC    CL1'.'              -trace data
+ZTRCU84Z DC    CL1'.'              -trace data
+ZTRCU840 DC    CL1'.'              -trace data
+ZTRCU841 DC    CL1'.'              -trace data
+ZTRCU842 DC    CL1'.'              -trace data
+ZTRCU843 DC    CL1'.'              -trace data
+ZTRCU844 DC    CL1'.'              -trace data
+ZTRCU845 DC    CL1'.'              -trace data
+ZTRCU846 DC    CL1'.'              -trace data
+ZTRCU847 DC    CL1'.'              -trace data
+ZTRCU848 DC    CL1'.'              -trace data
+ZTRCU849 DC    CL1'.'              -trace data
+ZTRCU84$ DC    CL1'.'              -trace data
+ZTRCU84# DC    CL1'.'              -trace data
+ZTRCU84@ DC    CL1'.'              -trace data
+ZTRC@84Z EQU   *-ZTRC84IR          trace data size
+*
+**       U85= Stand-alone trace data
+*
+ZTRC85X1 DC    CL4'U85='           trace ID
+ZTRC85X2 DC    CL8'EMFXIT'         routine ID
+ZTRC85IR DS    0CL39               trace data
+ZTRCU85A DC    CL1'.'              -trace data
+ZTRCU85B DC    CL1'.'              -trace data
+ZTRCU85C DC    CL1'.'              -trace data
+ZTRCU85D DC    CL1'.'              -trace data
+ZTRCU85E DC    CL1'.'              -trace data
+ZTRCU85F DC    CL1'.'              -trace data
+ZTRCU85G DC    CL1'.'              -trace data
+ZTRCU85H DC    CL1'.'              -trace data
+ZTRCU85I DC    CL1'.'              -trace data
+ZTRCU85J DC    CL1'.'              -trace data
+ZTRCU85K DC    CL1'.'              -trace data
+ZTRCU85L DC    CL1'.'              -trace data
+ZTRCU85M DC    CL1'.'              -trace data
+ZTRCU85N DC    CL1'.'              -trace data
+ZTRCU85O DC    CL1'.'              -trace data
+ZTRCU85P DC    CL1'.'              -trace data
+ZTRCU85Q DC    CL1'.'              -trace data
+ZTRCU85R DC    CL1'.'              -trace data
+ZTRCU85S DC    CL1'.'              -trace data
+ZTRCU85T DC    CL1'.'              -trace data
+ZTRCU85U DC    CL1'.'              -trace data
+ZTRCU85V DC    CL1'.'              -trace data
+ZTRCU85W DC    CL1'.'              -trace data
+ZTRCU85X DC    CL1'.'              -trace data
+ZTRCU85Y DC    CL1'.'              -trace data
+ZTRCU85Z DC    CL1'.'              -trace data
+ZTRCU850 DC    CL1'.'              -trace data
+ZTRCU851 DC    CL1'.'              -trace data
+ZTRCU852 DC    CL1'.'              -trace data
+ZTRCU853 DC    CL1'.'              -trace data
+ZTRCU854 DC    CL1'.'              -trace data
+ZTRCU855 DC    CL1'.'              -trace data
+ZTRCU856 DC    CL1'.'              -trace data
+ZTRCU857 DC    CL1'.'              -trace data
+ZTRCU858 DC    CL1'.'              -trace data
+ZTRCU859 DC    CL1'.'              -trace data
+ZTRCU85$ DC    CL1'.'              -trace data
+ZTRCU85# DC    CL1'.'              -trace data
+ZTRCU85@ DC    CL1'.'              -trace data
+ZTRC@85Z EQU   *-ZTRC85IR          trace data size
+*
+**       U86= Stand-alone trace data
+*
+ZTRC86X1 DC    CL4'U86='           trace ID
+ZTRC86X2 DC    CL8'EMFXIT'         routine ID
+ZTRC86IR DS    0CL39               trace data
+ZTRCU86A DC    CL1'.'              -trace data
+ZTRCU86B DC    CL1'.'              -trace data
+ZTRCU86C DC    CL1'.'              -trace data
+ZTRCU86D DC    CL1'.'              -trace data
+ZTRCU86E DC    CL1'.'              -trace data
+ZTRCU86F DC    CL1'.'              -trace data
+ZTRCU86G DC    CL1'.'              -trace data
+ZTRCU86H DC    CL1'.'              -trace data
+ZTRCU86I DC    CL1'.'              -trace data
+ZTRCU86J DC    CL1'.'              -trace data
+ZTRCU86K DC    CL1'.'              -trace data
+ZTRCU86L DC    CL1'.'              -trace data
+ZTRCU86M DC    CL1'.'              -trace data
+ZTRCU86N DC    CL1'.'              -trace data
+ZTRCU86O DC    CL1'.'              -trace data
+ZTRCU86P DC    CL1'.'              -trace data
+ZTRCU86Q DC    CL1'.'              -trace data
+ZTRCU86R DC    CL1'.'              -trace data
+ZTRCU86S DC    CL1'.'              -trace data
+ZTRCU86T DC    CL1'.'              -trace data
+ZTRCU86U DC    CL1'.'              -trace data
+ZTRCU86V DC    CL1'.'              -trace data
+ZTRCU86W DC    CL1'.'              -trace data
+ZTRCU86X DC    CL1'.'              -trace data
+ZTRCU86Y DC    CL1'.'              -trace data
+ZTRCU86Z DC    CL1'.'              -trace data
+ZTRCU860 DC    CL1'.'              -trace data
+ZTRCU861 DC    CL1'.'              -trace data
+ZTRCU862 DC    CL1'.'              -trace data
+ZTRCU863 DC    CL1'.'              -trace data
+ZTRCU864 DC    CL1'.'              -trace data
+ZTRCU865 DC    CL1'.'              -trace data
+ZTRCU866 DC    CL1'.'              -trace data
+ZTRCU867 DC    CL1'.'              -trace data
+ZTRCU868 DC    CL1'.'              -trace data
+ZTRCU869 DC    CL1'.'              -trace data
+ZTRCU86$ DC    CL1'.'              -trace data
+ZTRCU86# DC    CL1'.'              -trace data
+ZTRCU86@ DC    CL1'.'              -trace data
+ZTRC@86Z EQU   *-ZTRC86IR          trace data size
+*
+**       ZTRCE Stand-alone trace crumbs
+*
+ZTRCXID  DS    0C
+ZTRCXIDA DC    CL1'A'              -trace XID
+ZTRCXIDB DC    CL1'B'              -trace XID
+ZTRCXIDC DC    CL1'C'              -trace XID
+ZTRCXIDD DC    CL1'D'              -trace XID
+ZTRCXIDE DC    CL1'E'              -trace XID
+ZTRCXIDF DC    CL1'F'              -trace XID
+ZTRCXIDG DC    CL1'G'              -trace XID
+ZTRCXIDH DC    CL1'H'              -trace XID
+ZTRCXIDI DC    CL1'I'              -trace XID
+ZTRCXIDJ DC    CL1'J'              -trace XID
+ZTRCXIDK DC    CL1'K'              -trace XID
+ZTRCXIDL DC    CL1'L'              -trace XID
+ZTRCXIDM DC    CL1'M'              -trace XID
+ZTRCXIDN DC    CL1'N'              -trace XID
+ZTRCXIDO DC    CL1'O'              -trace XID
+ZTRCXIDP DC    CL1'P'              -trace XID
+ZTRCXIDQ DC    CL1'Q'              -trace XID
+ZTRCXIDR DC    CL1'R'              -trace XID
+ZTRCXIDS DC    CL1'S'              -trace XID
+ZTRCXIDT DC    CL1'T'              -trace XID
+ZTRCXIDU DC    CL1'U'              -trace XID
+ZTRCXIDV DC    CL1'V'              -trace XID
+ZTRCXIDW DC    CL1'W'              -trace XID
+ZTRCXIDX DC    CL1'X'              -trace XID
+ZTRCXIDY DC    CL1'Y'              -trace XID
+ZTRCXIDZ DC    CL1'Z'              -trace XID
+ZTRCXID0 DC    CL1'0'              -trace XID
+ZTRCXID1 DC    CL1'1'              -trace XID
+ZTRCXID2 DC    CL1'2'              -trace XID
+ZTRCXID3 DC    CL1'3'              -trace XID
+ZTRCXID4 DC    CL1'4'              -trace XID
+ZTRCXID5 DC    CL1'5'              -trace XID
+ZTRCXID6 DC    CL1'6'              -trace XID
+ZTRCXID7 DC    CL1'7'              -trace XID
+ZTRCXID8 DC    CL1'8'              -trace XID
+ZTRCXID9 DC    CL1'9'              -trace XID
+ZTRCXID$ DC    CL1'$'              -trace XID
+ZTRCXID# DC    CL1'#'              -trace XID
+ZTRCXID@ DC    CL1'@'              -trace XID
+ZRECX@ZS EQU   *-ZTRCXID
+         DS    0D
+ZEVT@SZE EQU   *-ZEVT               ZEVT size
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ZXQE                                                */
+*/*                                                                  */
+*/* Function:    Exit Queue Element map                              */
+*/*                                                                  */
+*/* Description: Contains exit related control data required         */
+*/*              to manage dynamically added exits.                  */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+ZXQE     DSECT ,
+XQEID    DS    CL4'ZXQE'           ID
+XQECHPTR DS    A                   ZXQE chain ptr
+XQEZEXTP DS    A                   ZEXT chain ptr
+XQEFLG1  DS    XL1               1-flags
+XQE@XDIS EQU   X'80'               exit disabled indicator
+XQE@XADD EQU   X'40'               exit added indicator
+XQE@XDEL EQU   X'20'               exit deleted indicator
+         DS    0X
+XQESTATE DS    XL1               2-STATE={ACTIVE|INACTIVE}
+XQE@ACTV EQU   MSTR@ACT            active
+XQE@INAC EQU   MSTR@NAC            inactive
+         DS    0X
+XQEPOS   DS    XL1               3-exit postion
+XQE@FRST EQU   MSTR@1ST            POS=FIRST
+XQE@LAST EQU   MSTR@LST            POS=LAST
+XQE@SYST EQU   MSTR@SYS            POS=SYSTEM
+         DS    0X
+XQECOMF1 DS    XL1               4-common flags
+XQE@GENR EQU   X'80'               generic jobname
+XQE@SMFR EQU   X'40'               SMF={NO|YES}
+XQE@WARN EQU   X'20'               WARNWTO={NO|YES}
+XQE@EXTZ EQU   X'10'               ZEXT not required
+XQE@CMND EQU   X'08'               COMMAND='command'
+XQE@U29X EQU   X'04'               IEFU29 SMF dump exit
+XQE@29LX EQU   X'02'               IEFU29L SMF dump LOGR exit
+XQE@01F7 EQU   X'01'               -available
+         DS    0X
+XQECOMF2 DS    XL1               5-common flags
+XQE@AV20 EQU   X'80'               -available
+XQE@AV21 EQU   X'40'               -available
+XQE@AV22 EQU   X'20'               -available
+XQE@AV23 EQU   X'10'               -available
+XQE@AV24 EQU   X'08'               -available
+XQE@AV25 EQU   X'04'               -available
+XQE@AV26 EQU   X'02'               -available
+XQE@AV27 EQU   X'01'               -available
+         DS    0X
+XQEJTYPE DS    XL1               6-JOB TYPE
+XQE@JOB  EQU   X'80'               JOB
+XQE@STC  EQU   X'40'               STC
+XQE@TSO  EQU   X'20'               TSO
+XQE@SUB  EQU   X'10'               SUB
+XQE@ASCH EQU   X'08'               ASCH
+XQE@OMVS EQU   X'04'               OMVS
+XQE@JSR6 EQU   X'02'               -available
+XQE@JSR7 EQU   X'01'               -available
+         DS    0X
+XQEUTLF1 DS    XL1               7-IEFUTL flags
+XQE@JCPU EQU   X'80'               JOB CPU: no limit
+XQE@JEXT EQU   X'40'               JOB CPU extensions: no limit
+XQE@SCPU EQU   X'20'               STEP CPU: no limit
+XQE@SEXT EQU   X'10'               STEP CPU extensions: no limit
+XQE@WTME EQU   X'08'               WAIT time: no limit
+XQE@WEXT EQU   X'04'               WAIT time extensions: no limit
+XQE@JBTU EQU   X'02'               job TU CPU value specified
+XQE@STTU EQU   X'01'               step TU CPU value specified
+         DS    0X
+XQEUXTF1 DS    XL1               8-IEFn exit flags
+XQE@OUTL EQU   X'80'               SYSOUT: no limit
+XQE@OUTX EQU   X'40'               SYSOUT: extensions: no limit
+XQE@DCMD EQU   X'20'               DUMPCMD='command'
+XQE@DMSG EQU   X'10'               DUMPMSG={NO|YES}
+XQE@UJPR EQU   X'08'               IEFUJO PURGE={NO|YES}
+XQE@U8XW EQU   X'04'               IEFU83,84,85,86 SUPPRESS={NO|YES}
+XQE@U1R6 EQU   X'02'               -available
+XQE@X1R7 EQU   X'01'               -available
+         DS    0F
+XQEJOBCP DS    F                   JOBCPU increment SECs/TUs
+XQEJOBXT DS    F                   JOBCPU max extensions allowed
+XQESTPCP DS    F                   STEPCPU increment SECs/TUs
+XQESTPXT DS    F                   STEPCPU max extensions allowed
+XQEWTIME DS    F                   WAITTIME increment seconds
+XQEWAITX DS    F                   WAITTIME max extensions allowed
+XQEOUTSL DS    F                   SYSOUT increment lines
+XQEOUTXL DS    F                   SYSOUT max extensions allowed
+XQEUJPCT DS    F                   IEFUJP processing count
+XQEU29CT DS    F                   IEFU29 processing count
+XQE29LCT DS    F                   IEFU29L processing count
+XQEU8XCT DS    F                   IEFU83,84,85,86 processing count
+         DS    0C
+XQEJOBS  DS    0CL12               job type
+XQESUBID DS    CL4                 -1.{JOB|STC|TSO|OMVS|ASCH}
+XQESUBNM DS    CL4                 -2.{JES2/3|STC|TSO|OMVS|ASCH}
+XQEJOBNM DS    CL8                 -3.commplete or generic jobname
+XQE@JBSZ EQU   *-XQEJOBS           donot change order
+         DS    0C
+XQEXNAME DS    CL8                 exit name
+XQEDYNAM DS    CL16                system dynamic exit name
+         DS    0C
+XQESMFTP DS    XL1                 binary SMF record number
+XQESMFNM DS    CL3                 decimal SMF record number
+         DS    0C
+XQECOMLN DS    AL2                 command text length
+XQECOMND DS    CL60                COMMAND='command'
+XQE@COMZ EQU   *-XQECOMND          command text length
+         DS    0C
+XQE29CLN DS    AL2                 command text length
+XQE29CMD DS    CL60                DUMPCMD='command'
+XQE@29CZ EQU   *-XQE29CMD          command text length
+*
+**       IEFU83,84,85,86 processing data
+*
+         DS    0C
+XQE8XCNT EQU   XQE29CLN,2          SMF records count
+XQE8XSMF EQU   XQE29CMD,60         SUPPRESS=records-list
+XQE@8XCZ EQU   *-XQE8XSMF          suppress text length
+         DS    0D
+XQE@SIZE EQU   *-ZXQE
+XQE@MAX  DS    0XL(256-XQE@SIZE+1) size restriction
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ZQUE                                                */
+*/*                                                                  */
+*/* Function:    Queue Element entry map                             */
+*/*                                                                  */
+*/* Description: ZXQE queue descriptor entry                         */
+*/*                                                                  */
+*/* Warning:     Entry size is related to ZEVTQUES table entry       */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+ZQUE     DSECT ,
+QUEZXQEA DS      A                 ZXQE queue address
+QUEZXQEC DS      F                 ZXQE processing count
+QUEXNAME DS      CL8               ZXQE SMF exit name
+QUE@SIZE EQU     *-ZQUE            ZQUE size
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ZEXT                                                */
+*/*                                                                  */
+*/* Function:    Exit Queue Element Extension map                    */
+*/*                                                                  */
+*/* Description: Contains exit instance related control data.        */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+ZEXT     DSECT ,
+EXTID    DS    CL4'ZEXT'           ID
+EXTCHPTR DS    A                   chain pointer
+EXTFLGS  DS    0F                  flags
+EXTFLG1  DS    XL1                 common flags
+EXT@FREE EQU   X'80'               free entry indicator
+EXT@GENJ EQU   X'40'               generic jobname indicator
+EXT@NOGN EQU   X'20'               nongeneric jobname indicator
+EXT@RV13 EQU   X'10'               -available
+EXT@RV14 EQU   X'08'               -available
+EXT@RV15 EQU   X'04'               -available
+EXT@RV16 EQU   X'02'               -available
+EXT@RV17 EQU   X'01'               -available
+EXTFLG23 DS    XL2                 -reserved flags
+EXTC     DS    0X                 start of cleared section
+EXTWRKFL DS    XL1                 work flags
+EXT@SMFR EQU   X'80'               SMF record written
+EXT@CMND EQU   X'40'               command issued
+EXT@RV22 EQU   X'20'               -available
+EXT@RV23 EQU   X'10'               -available
+EXT@RV24 EQU   X'08'               -available
+EXT@RV25 EQU   X'04'               -available
+EXT@RV26 EQU   X'02'               -available
+EXT@RV27 EQU   X'01'               -available
+EXT@FLGS EQU   *-EXTFLGS           OIL/NIL boundary
+         DS    0F
+EXTJOBXC DS    F                   job CPU granted extension count
+EXTSTPXC DS    F                   step CPU granted extension count
+EXTWAITC DS    F                   wait time granted extension count
+EXTOUTXC DS    F                   SYSOUT lines granted extension count
+EXTTOTSL DS    F                   SYSOUT total lines extended count
+         DS    0C
+EXTFREE  DS    CL4                 free element ID
+EXTXNAME DS    CL8                 exit name
+EXTJOBNM DS    CL8                 non-generic jobname
+EXTSTOKN DS    XL8                 STOKEN
+EXT@ZERO EQU   *-EXTC             end of cleared section
+         DS    0D
+EXT@SIZE EQU   *-ZEXT
+EXT@MAX  DS    0XL(128-EXT@SIZE+1) size restriction
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        XSA                                                 */
+*/*                                                                  */
+*/* Function:    Service routine extended savearea map               */
+*/*                                                                  */
+*/* Description: The XSA is used by subsystem server components      */
+*/*              to request subsystem server service requests.       */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+XSA      DSECT ,
+XSAID    DC    CL4'XSA'               ID
+XSAFLG1  DS    XL1                    flags
+XSA@INIR EQU   X'80'                  EMFINI caller indicator
+XSA@ADDR EQU   X'40'                  add request indicator
+XSA@REFR EQU   X'20'                  refresh request indicator
+XSA@MODF EQU   X'10'                  modify request indicator
+XSA@CHNG EQU   X'08'                  exit state changed indicator
+XSA@NFND EQU   X'04'                  exit not defined indicator
+XSA@SHUT EQU   X'02'                  shutdown request indicator
+XSA@RV17 EQU   X'01'                  -available
+         DS    0X
+XSAFLG2  DS    XL1                    flags
+XSA@ALLX EQU   X'80'                  all exits request indicator
+XSA@ACTX EQU   X'40'                  activate exit(s) indicator
+XSA@INAX EQU   X'20'                  inactivate exit(s) indicator
+XSA@XQEC EQU   X'10'                  XQE queue chanded indicator
+XSA@RV24 EQU   X'08'                  -available
+XSA@RV25 EQU   X'04'                  -available
+XSA@RV26 EQU   X'02'                  -available
+XSA@RV27 EQU   X'01'                  -available
+         DS    0X
+XSAFLG3  DS    XL1                    flags
+XSA@RV30 EQU   X'80'                  -available
+XSA@RV31 EQU   X'40'                  -available
+XSA@RV32 EQU   X'20'                  -available
+XSA@RV33 EQU   X'10'                  -available
+XSA@RV34 EQU   X'08'                  -available
+XSA@RV35 EQU   X'04'                  -available
+XSA@RV36 EQU   X'02'                  -available
+XSA@RV37 EQU   X'01'                  -available
+         DS    0X
+XSAJTYPE DS    AL1                    job type
+         DS    0A
+XSAXQEA  DS    A                      ZXQE address
+XSADABA  DS    A                      DAB address
+XSAZIOA  DS    A                      ZIO address
+XSAEXITA DS    A                      EMFXIT EPA ptr
+XSAMSTRA DS    A                      MSTR table address
+XSAMSTRC DS    A                      MSTR table entries
+XSAMSTRE DS    A                      MSTR table address
+XSAZRECA DS    A                      ZREC table address
+XSAZPARA DS    A                      ZPAR table address
+XSAZXQEA DS    A                      ZXQE element address
+XSAZEXTA DS    A                      ZEXT element address
+XSASTGED DS    A                      ZXQE staged queue address
+         DS    0A
+XSAUTLQ  DS    A                      IEFUTL ZXRE queue address
+XSAUSOQ  DS    A                      IEFUSO ZXRE queue address
+XSAUJPQ  DS    A                      IEFUJP ZXRE queue address
+XSAU29Q  DS    A                      IEFU29 ZXRE queue address
+XSA29LQ  DS    A                      IEFU29L ZXRE queue address
+XSAU83Q  DS    A                      IEFU83 ZXRE queue address
+XSAU84Q  DS    A                      IEFU84 ZXRE queue address
+XSAU85Q  DS    A                      IEFU85 ZXRE queue address
+XSAU86Q  DS    A                      IEFU86 ZXRE queue address
+         DS    0F
+XSACKEY  DS    F                      caller protect key
+XSACPID  DS    F                      staging ZXQE CPOOL ID
+XSACPXT  DS    F                      staging ZEXT CPOOL ID
+XSAJTYPL DS    F                      subsysID keyword length
+XSARSVZ1 DS    F                      -available
+XSARSVZ2 DS    F                      -available
+         DS    0F
+XSAIPAR  DS    0XL12                  input GPRs
+XSAIGRF  DS    F                      -R15
+XSAIGR0  DS    F                      -R0
+XSAIGR1  DS    F                      -R1
+XSAIPRL  EQU   *-XSAIPAR              keep order
+         DS    0F
+XSAIARS  DS    0XL12                  input ARs
+XSAIARF  DS    F                      -AR15
+XSAIAR0  DS    F                      -AR0
+XSAIAR1  DS    F                      -AR1
+XSAIAPL  EQU   *-XSAIARS              keep order
+         DS    0F
+XSAOPAR  DS    0XL12                  output GPRs
+XSARC    DS    F                      -R15
+XSARSN   DS    F                      -R0
+XSAOGR1  DS    F                      -R1
+XSA@OPRL EQU   *-XSAOPAR              keep order
+         DS    0F
+XSAOARS  DS    0XL12                  output ARs
+XSAOARF  DS    F                      -AR15
+XSAOAR0  DS    F                      -AR0
+XSAOAR1  DS    F                      -AR1
+XSAOAPL  EQU   *-XSAIARS              keep order
+XSACLEAR EQU   *-XSA                  scrub size
+         DS    0F
+XSASAVE  DS    18F                    mainline savearea
+XSASUBR  DS    18F                    subroutine savearea
+XSANSTR  DS    18F                    nested subroutine savearea
+XSAPLST  DS    XL256                  general parmlist
+         DS    0C
+XSASUBID DS    CL4                    {JOB|STC|TSO|OMVS|ASCH}
+XSASUBNM DS    CL4                    {JES2/3|STC|TSO|OMVS|ASCH}
+XSAFUNC  DS    CL8                    function code
+XSAJOBNM DS    CL8                    jobname
+XSAEXIT  DS    CL8                    exit member name
+XSAMODNM DS    CL8                    ZEMF exit module name
+XSASTATE DS    CL8                    exit state
+XSAXNAME DS    CL8                    MODIFY exit name
+XSAXITNM DS    CL16                   dynamic exit name
+XSARID   DS    CL16                   RID
+         DS    0C
+XSACPHDR DS    0CL24                  cell pool header
+XSACPSUB DS    CL4                    -server name
+XSACPHDD DS    CL20                   -header data
+XSACPHDZ EQU   *-XSACPHDR             keep order
+         DS    0D
+XSA@SIZE EQU   *-XSA                  XSA size
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        MSTR                                                */
+*/*                                                                  */
+*/* Function:    Master member exit definition record                */
+*/*                                                                  */
+*/* Description: Maps ADDEXIT() member exit attributes               */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+MSTR     DSECT ,
+MSTRID   DS    CL4'MSTR'           ID
+MSTRSTAT DS    XL1                exit state
+MSTR@ACT EQU   X'80'               STATE=ACTIVE
+MSTR@NAC EQU   X'00'               STATE=INACTIVE
+         DS    0X
+MSTRPOS  DS    XL1                exit position
+MSTR@1ST EQU   X'80'               POS=FIRST
+MSTR@LST EQU   X'40'               POS=LAST
+MSTR@SYS EQU   X'20'               POS=SYSTEM
+         DS    0X
+MSTRSYS  DS    XL1                system scope
+MSTR@YES EQU   X'80'               SYS=YES
+MSTR@NO  EQU   X'00'               SYS=NO
+         DS    0X
+MSTRSCOP DS    XL1                subsystem scope
+MSTR@STC EQU   X'80'               SYSSTC
+MSTR@TSO EQU   X'40'               SYSTSO
+MSTR@JES EQU   X'20'               SYSJESn
+MSTR@ASC EQU   X'10'               SYSASCH
+MSTR@OMV EQU   X'08'               SYSOMVS
+         DS    0C
+MSTRZRSV DS    CL8                 -reserved
+MSTRNAME DS    CL8                SMF exit member name
+MSTREXIT DS    CL8                 ZEMF exit routine name
+MSTRDYNM DS    CL16               SYS dynamic exit name
+         DS    0D
+MSTR@SZE EQU   *-MSTR              entry size
+MSTR@MAX EQU   (MSTR@SZE*MSTR@NUM) MSTR table size
+MSTR@MXE EQU   &ZMSTTAB            8K max
+MSTR@NUM EQU   (MSTR@MXE)/MSTR@SZE number of entries
+*
+MSTE     DSECT ,
+MSTEID   DS    CL4'MSTE'           ID
+MSTESTAT DS    AL1                 exit state
+MSTEFLG1 DS    XL1                 flags
+MSTEVERS DS    CL6                 product version
+MSTETEND DS    AL4                 table end indicator
+MSTEMODN DS    CL8                 ZEMF exit routine name
+MSTENAME DS    CL8                 SMF exit name
+MSTEXITN DS    CL16                {SYS|SYSyyy} dynamic exit name
+         DS    0D
+MSTE@SZE EQU   *-MSTE              entry size
+MSTE@MAX EQU   (MSTE@SZE*MSTE@NUM) MSTE table size
+MSTE@MXE EQU   &ZMSETAB            8K max
+MSTE@NUM EQU   (MSTE@MXE)/MSTE@SZE number of entries
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ZREC                                                */
+*/*                                                                  */
+*/* Function:    Record map                                          */
+*/*                                                                  */
+*/* Description: Maps exit member record data.                       */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+ZRECPFX  DSECT ,
+ZRECPFXI DS    CL4'ZREC'           prefix ID
+ZRECFRST DS    A                   first ZREC address
+ZRECCURR DS    A                   current ZREC address
+ZRECLAST DS    A                   last record address
+ZRECENTY DS    F                   total ZREC records
+ZRECRSVR DS    F                   -available
+ZREC@PFL EQU   *-ZRECPFX           prefix size
+*
+ZREC     DSECT ,
+ZRECORD  DS    0CL80
+ZRECDATA DS    CL72                record data
+ZREC@DTZ EQU   *-ZRECDATA          record data length
+ZRECSEQN DS    CL8                 sequence number
+ZREC@SZE EQU   *-ZREC              entry size
+ZREC@MAX EQU   (ZREC@SZE*ZREC@NUM) ZREC table size
+ZREC@MXE EQU   &ZRECTAB            32K
+ZREC@NUM EQU   (ZREC@MXE)/ZREC@SZE number of entries
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ZPAR                                                */
+*/*                                                                  */
+*/* Function:    Parmdata                                            */
+*/*                                                                  */
+*/* Description: Maps parmlib parameter data                         */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+ZPAR     DSECT ,
+ZPARID   DS    CL4'ZPAR'               ID
+ZPARLEN  DS    F                       parmdata length
+ZPARPFX  EQU   *-ZPAR                  prefix
+ZPARDATA DS    CL(&ZPARTAB-ZPARPFX)    parmdata value
+ZPAR@DTL EQU   *-ZPARDATA              ZPAR total size
+ZPAR@SZE EQU   *-ZPAR                  entry size
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        KEYW                                                */
+*/*                                                                  */
+*/* Function:    Exit-related parameters                             */
+*/*                                                                  */
+*/* Description: Maps keyword parameters table entry.                */
+*/*                                                                  */
+*/* Table entry: +00 exit name                                       */
+*/*              +08 exit routine EPA                                */
+*/*              +12 staging queue offset                            */
+*/*              +16 keyword data length                             */
+*/*              +18 keyword name length                             */
+*/*              +20 keyword name                                    */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+KEYW     DSECT ,
+KEYWMEM  DS    CL8                     exit member name
+KEYWEPA  DS    A                       routine EPA
+KEYWQUE  DS    AL4                     staging queue offset
+KEYWOPTS DS    XL1                    exit options
+KEY@EXTR EQU   X'80'                   ZEXT element required
+KEY@NONE EQU   X'00'                   ZEXT element not required
+KEYWSMF  DS    CL1                     SMF={N|Y} requirement
+KEYWCMD  DS    CL1                     COMMAND={NO|YES} requirement
+KEYWRSV2 DS    AL1                     -reserved
+KEYWDATL DS    AL2                     keyword data length
+KEYWORDL DS    AL2                     keyword name length
+KEYWORDN DS    CL16                    keyword name
+         DS    0D
+KEYW@SZE EQU   *-KEYW                  keyword entry size
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ZRWA                                                */
+*/*                                                                  */
+*/* Function:    Subsystem server recovery workarea                  */
+*/*                                                                  */
+*/* Description: Contains data about the original error, recovery    */
+*/*              environment data and actions of previously entered  */
+*/*              recovery routines.                                  */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+ZRWA     DSECT ,
+ZRWAID   DS    CL4'ZRWA'               ID
+ZRWAFLG1 DS    XL1                    Flags
+ZRWA@PER EQU   X'80'                   ABEND recursion indicator
+ZRWA@WTO EQU   X'40'                   WTO={NO|YES} indicator
+ZRWA@DMP EQU   X'20'                   SDUMP={NO|YES} indicator
+ZRWA@LOG EQU   X'10'                   LOGREC{NO|YES} indicator
+         DS    0X
+ZRWAWORK DS    XL1                    Work flags
+ZRWA@WTI EQU   X'80'                   WTO issued
+ZRWA@SDI EQU   X'40'                   SDUMP issued
+ZRWA@SYS EQU   X'20'                   system ABEND code
+         DS    0X
+ZRWAFRR  DS    XL1                    FRR flags
+ZRWA@ACT EQU   X'80'                   FRR established indicator
+ZRWA@DEL EQU   X'40'                   FRR deleted by SETRP REMREC=YES
+ZRWA@LCK EQU   X'20'                   LOCAL lock held by exit caller
+         DS    0X
+ZRWARAV1 DS    XL1                     -available
+         DS    0F
+ZRWARTRY DS    A                       retry address
+ZRWATEA  DS    A                       SDWATRN2 - translation address
+ZRWAFRRA DS    A                       FRR workarea address
+ZRWAZEVT DS    A                       ZEVT address
+ZRWATOKN DS    A                       ESTAE delete token
+ZRWAWORD DS    A                       workarea
+         DS    0F
+ZRWAFRRS DS    18F                     EMFFRR savearea
+ZRWARTMS DS    18F                     EMFRTM savearea
+         DS    0F
+ZRWASUBN DS    CL4                     subsystem name
+ZRWASDRC DS    XL4                     SDUMP return code
+ZRWARSN  DS    XL4                     ABEND reason code
+ZRWAAPSW DS    XL8                     SDWAEC2 PSW
+         DS    0F
+ZRWABEND DS    0XL4                    ABEND code
+ZRWASFLG DS    XL1                     -SDWACMPF
+ZRWASABN DS    XL3                     -SDWACMPC
+ZRWA@BSZ EQU   *-ZRWABEND              keep order
+*
+**       RETRY ARs/GPRs
+*
+         DS    0F
+ZRWAARS  DS    XL64                    Retry ARs
+ZRWAGPRS DS    XL64                    Retry GPRs
+*
+**       RECPARM recovery data
+*
+ZRWARECP DS    0CL24                   RECPARM
+ZRWALMOD DS    CL8                     LMOD
+ZRWASECT DS    CL8                     CSECT
+ZRWARECR DS    CL8                     recovery routine
+ZRWARECL EQU   *-ZRWARECP              RECPARM size
+         DS    0D
+ZRWADWRD DS    D                       workarea
+ZRWAXMOD DS    CL8                     default LMOD
+ZRWAXECT DS    CL8                     default CSECT
+ZRWACONA DS    XL8                     workarea
+ZRWACONR DS    XL8                     workarea
+ZRWARSVZ DS    CL3                     -reserved
+ZRWATYPE DS    CL1                     -ABEND type
+ZRWACODE DS    CL4                     -ABEND code
+ZRWARSNC DS    CL8                     -reason code
+*
+**       WTO Error Message
+*
+ZRWAW    DS    0F
+ZRWAWTO  DS    0CL100                  WTO listform
+         DS    XL4                     -textlen+MCS+MSGID
+ZRWAWSID DS    CL4                     -subsystem server ID
+ZRWAWMID DS    CL3                     -msg ID
+         DS    CL1                     -blank
+ZRWAWSUB DS    CL4                     -subsystem server name
+         DS    CL15                    -blanks
+ZRWAWMOD DS    CL7                     -module name
+         DS    CL1                     -separator
+ZRWAWRTN DS    CL7                     -routine name
+         DS    CL7                     -ABEND-ID
+ZRWAWTYP DS    CL1                     -ABEND type
+ZRWAWCOD DS    CL4                     -ABEND code
+         DS    CL5                     -RSN-ID
+ZRWAWRSN DS    CL8                     -reason code
+ZRWADESC DS    XL4                     -DESC+ROUT codes
+         DS    CL25                    -blanks
+ZRWAWTOL EQU   *-ZRWAWTO               WTO listform
+*
+**       Dump title Workarea
+*
+ZRWAT    DS    0F
+ZRWATTLE DS    0CL100                  dump title
+ZRWADTLN DS    AL1                     -title length
+ZRWADSUB DS    CL4                     -subsystem name
+         DS    CL15                    -title text
+ZRWADMOD DS    CL7                     -module name
+         DS    CL1                     -separator
+ZRWADRTN DS    CL7                     -routine name
+         DS    CL1                     -blank
+ZRWADTYP DS    CL1                     -ABEND type
+ZRWADCOD DS    CL4                     -ABEND code
+         DS    CL1                     -text
+ZRWADRSN DS    CL8                     -RSN code
+         DS    CL58                    -blanks
+ZRWADDMZ EQU   *-ZRWATTLE              dump title length
+*
+**       General parmlist
+*
+ZRWAP    DS    0F
+ZRWAPLST DS    XL256                   parmlist
+ZRWA@PSZ EQU   *-ZRWAPLST
+         DS    0D
+ZRWA@SZE EQU   *-ZRWA                  ZRWA size
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        FRR                                                 */
+*/*                                                                  */
+*/* Function:    SETFRR recovery workarea                            */
+*/*                                                                  */
+*/* Description: Contains data about the original error, recovery    */
+*/*              environment data and actions of previously entered  */
+*/*              recovery routines.                                  */
+*/*                                                                  */
+*/********************************************************************/
+*--------+---------+---------+---------+---------+---------+---------+*
+FRR      DSECT ,
+FRRID    DS    CL3'FRR'            ID
+FRRFLG1  DS    XL1                 flags
+FRR@RTRY EQU   X'80'               RETRY indicator
+FRR@RECR EQU   X'40'               RECURSION indicator
+*
+FRRZRWA  DS    A                   ZRWA address
+FRRZEVT  DS    A                   ZEVT address
+FRRAVL3  DS    A                   -available
+FRRAVL4  DS    A                   -available
+FRRAVL5  DS    A                   -available
+FRR@SIZE EQU   *-FRR
+FRR@MAX  DS    0XL(24-FRR@SIZE+1)  SETFRR macro restriction
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:        DAB                                                */
+*/*                                                                 */
+*/* Function:    Dynamic allocation block                           */
+*/*                                                                 */
+*/* Description: The DAB is used by subsystem server components     */
+*/*              to request allocation/deallocation services.       */
+*/*                                                                 */
+*/*******************************************************************/
+*--------+---------+---------+---------+---------+---------+--------+*
+DAB      DSECT ,
+DABID    DS    CL4'DAB'         ID
+DABFCID  DS    XL1              FCID
+DAB@ALLO EQU   X'80'            Allocation request
+DAB@DEAL EQU   X'40'            Deallocation request
+DAB@INFO EQU   X'20'            Retrieval request
+DAB@FC03 EQU   X'10'            -available
+DAB@FC04 EQU   X'08'            -available
+DAB@FC05 EQU   X'04'            -available
+DAB@FC06 EQU   X'02'            -available
+DAB@FC07 EQU   X'01'            -available
+         DS    0X
+DABFLG1  DS    XL1              flags
+DAB@DDNM EQU   X'80'            DDname supplied indicator
+DAB@DSNM EQU   X'40'            DSName supplied indicator
+DAB@AMEM EQU   X'20'            Member supplied indicator
+DAB@SOUT EQU   X'10'            SYSOUT supplied indicator
+DAB@SWTR EQU   X'08'            SYSOUT WTR name indicator
+DAB@KEEP EQU   X'04'            keep allocated indicator
+DAB@AOLD EQU   X'02'            DISP=OLD allocation indicator
+DAB@AMOD EQU   X'01'            DISP=MOD allocation indicator
+         DS    0X
+DABFLG2  DS    XL1              work flags
+DAB@ALRQ EQU   X'80'            allocation call indicator
+DAB@DLRQ EQU   X'40'            deallocation call indicator
+DAB@INRQ EQU   X'20'            retrieval call indicator
+DAB@RSV0 EQU   X'10'            -available
+DAB@2SV4 EQU   X'08'            -available
+DAB@2SV5 EQU   X'04'            -available
+DAB@2SV6 EQU   X'02'            -available
+DAB@2SV7 EQU   X'01'            -available
+         DS    0X
+DABCLASS DS    CL1              SYSOUT=class
+         DS    0X
+DABDSORG DS    XL2              DSORG
+DAB@PO   EQU   X'0200'          -PO
+DAB@PS   EQU   X'4000'          -PS
+DABLRECL DS    XL2              -LRECL
+         DS    0F
+DABRC    DS    F                RC
+DABXRC   DS    F                RC
+DABRSN   DS    F                RSN
+DABINFO  DS    F                DYNALLOC info code
+DABERROR DS    F                DYNALLOC error code
+DABRSFL4 DS    F                -available
+         DS    0C
+DABDDNAM DS    CL8              DDname
+DABMEMBR DS    CL8              member name
+DABWTRNM DS    CL8              SYSOUT WTRname
+DABDSNAM DS    CL44             DSName
+DAB@CLER EQU   *-DAB            scrub size
+*
+DABRBP   DS    F                S99RBP
+DABRB    DS    CL(RBLEN)        S99RB block
+DABTUPL  DS    16F              S99TUPL block
+DABTUPLZ EQU   *-DABTUPL        block length
+*
+DABALLOC DS    0F
+DABDSNTU DS    AL2(DALDSNAM)
+         DS    X'0001'
+         DS    X'002C'
+DABDSN   DS    CL44' '          DSName
+*
+DABMEMTU DS    AL2(DALMEMBR)
+         DS    X'0001'
+         DS    X'0008'
+DABMEM   DS    CL8' '           Member Name
+*
+DABDDNTU DS    AL2(DALDDNAM)
+         DS    X'0001'
+         DS    X'0008'
+DABDDN   DS    CL8' '           DDname
+*
+DABOTU   DS    AL2(DALSYSOU)
+         DS    X'0001'
+         DS    X'0001'
+DABOUT   DS    CL1' '           SYSOUT=class
+*
+DABWTU   DS    AL2(DALSPGNM)
+         DS    X'0001'
+         DS    X'0008'
+DABWTR   DS    CL8' '           SYSOUT WTRname
+*
+DABSTSTU DS    AL2(DALSTATS)
+         DS    X'0001'
+         DS    X'0001'
+DABDISP  DS    X'00'            DISP=disposition
+*
+DABCLSTU DS    AL2(DALCLOSE)
+         DS    X'0000'          Deallocate at CLOSE
+DABALLSZ EQU   *-DABALLOC
+*
+DABMUNAL DS    0F
+DABUDNTU DS    AL2(DALDDNAM)
+         DS    X'0001'
+         DS    X'0008'
+DABUDDN  DS    CL8' '           DDName
+DABMUNLL EQU   *-DABMUNAL
+*
+DABDINRT DS    0F
+DABDINTU DS    AL2(DINDDNAM)
+         DS    X'0001'
+         DS    X'0008'
+DABDINDD DS    CL8' '           DDName
+*
+DABDINTP DS    AL2(DINRTORG)
+         DS    X'0001'
+         DS    X'0002'
+DABDINDS DS    XL2'0'           DSORG
+DABDINLL EQU   *-DABDINRT
+DABTUBLK EQU   *-DABRBP         scrub TU block
+         DS    0F
+DABSAVE  DS    18F              service routine savearea
+DABSAVEZ EQU   *-DABSAVE        size
+         DS    0F
+DABPLST  DS    XL128            parmlist
+DAB@PLSZ EQU   *-DABPLST        parmlist size
+         DS    0D
+DAB@SIZE EQU   *-DAB            DAB block size
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:        ZIO                                                */
+*/*                                                                 */
+*/* Function:    I/O Data management block                          */
+*/*                                                                 */
+*/* Description: The ZIO is used by subsystem server components     */
+*/*              to request I/O data services.                      */
+*/*                                                                 */
+*/*******************************************************************/
+*--------+---------+---------+---------+---------+---------+--------+*
+ZIO      DSECT ,
+ZIOID    DC    CL4'ZIO'                ID
+ZIORECZ  DS    F                       rocord length
+ZIORSVR  DS    F                       -reserved
+ZIOEODA  DS    0H
+ZIOBRR9  DS    XL2                     EODAD branch
+ZIODEAD  DS    XL2                     DONOT use
+ZIOOLFM  DS    D                       OPEN listform
+ZIOCLFM  DS    D                       CLOSE listform
+ZIODCB   DS    32F                     DCB block
+ZIODCBL  EQU   *-ZIODCB                DCB block length
+         DS    0C
+ZIORECOR DS    CL80                    record data
+ZIORECLN EQU   *-ZIORECOR              record length
+         DS    0D
+ZIO@SIZE EQU   *-ZIO                   ZIO size
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:        TOKENS                                             */
+*/*                                                                 */
+*/* Function:    Name/Token Pair maps                               */
+*/*                                                                 */
+*/* Description: Maps subsystem server tokens.                      */
+*/*                                                                 */
+*/*******************************************************************/
+*--------+---------+---------+---------+---------+---------+--------+*
+ZTKN     DSECT ,
+ZTKNNAME DS    0CL16                   NAME
+ZTKNMSAS DS    CL4                     -MSAS
+         DS    CL1                     -separator
+ZTKNSUBN DS    CL4                     -subsystem name
+         DS    CL1                     -separator
+ZTKNVERS DS    CL6                     -subsystem version
+*
+ZTKNDATA DS    0XL16                   DATA
+ZTKNSSCT DS    A                       -SSCT address
+ZTKNZEVT DS    A                       -ZEVT address
+ZTKNLPTK DS    XL8                     -ZEMFSRV delete token
+ZTKN@SZE EQU   *-ZTKN                  Name/Token Pair Length
+ZTKNMAXZ DS    0XL(32-ZTKN@SZE+1)      Name/Token pair restriction
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:        EXTTAB                                             */
+*/*                                                                 */
+*/* Function:    Exit keyword parameter table                       */
+*/*                                                                 */
+*/*******************************************************************/
+*--------+---------+---------+---------+---------+---------+--------+*
+ZXIT     DSECT ,
+ZXITEPA  DS    A                       exit patse routine EPA
+ZXITNAME DS    CL8                     keyword name
+ZXIT@SZE EQU   *-ZXIT
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:        SMFT                                               */
+*/*                                                                 */
+*/* Function:    SMF record header and exit data                    */
+*/*                                                                 */
+*/*******************************************************************/
+*--------+---------+---------+---------+---------+---------+--------+*
+SMFTHDR  DS    H                align for date & time
+SMFTREC  DS    0CL18            record header
+SMFTLEN  DS    BL2              record length
+SMFTSEG  DS    BL2              segment descriptor
+SMFTFLG  DS    BL1              header flag byte
+SMFTYPE  DS    BL1              record type (SMF=nnn option)
+SMFTTIME DS    BL4              TIME macro (BIN INTERVAL TOD)
+SMFTDATE DS    PL4              packed decimal date (00YYDDDF)
+SMFTSID  DS    CL4              system identifier
+*
+SMFTMAIN DS    0F
+SMFTSMFE DS    BL2              fixed SMFE record length
+SMFTSMFN DS    BL2              inuse SMFE record count
+SMFTSUB  DS    CL4              subsystem name
+SMFTJOB  DS    CL8              job name
+SMFTSTEP DS    CL8              step name
+SMFTVER  DS    CL8              subsystem version
+         DS    0D
+SMFT@HDR EQU   *-SMFTHDR        header size
+SMFE     DSECT ,
+SMFEJOB  DS    CL8              job name
+SMFESTEP DS    CL8              step name
+SMFENAME DS    CL8              exit name
+SMFEDYNX DS    CL16             dynamic exit name
+SMFEXTNT DS    F                extension count
+SMFERSV1 DS    F                -available
+SMFERSV2 DS    F                -available
+SMFERSV3 DS    F                -available
+SMFERSV4 DS    F                -available
+SMFERSV5 DS    F                -available
+SMFERSV6 DS    F                -available
+SMFERSV7 DS    F                -available
+SMFE@SZE EQU   *-SMFE           record length
+*/*******************************************************************/
+*/*                                                                 */
+*/* Name:        EQUATES                                            */
+*/*                                                                 */
+*/* Function:    Subsystem server equates                           */
+*/*                                                                 */
+*/* Description: Contains various equates used by subsystem         */
+*/*              server components.                                 */
+*/*                                                                 */
+*/*******************************************************************/
+*--------+---------+---------+---------+---------+---------+--------+*
+*
+**       Save Area Offsets
+*
+GPR@PLI  EQU   0            save area offset 0
+GPR@BWD  EQU   4            save area offset 4
+GPR@FWD  EQU   8            save area offset 8
+GPR@R14  EQU   12           save area offset 12
+GPR@R15  EQU   16           save area offset 16
+GPR@R0   EQU   20           save area offset 20
+GPR@R1   EQU   24           save area offset 24
+GPR@R2   EQU   28           save area offset 28
+GPR@R3   EQU   32           save area offset 32
+GPR@R4   EQU   36           save area offset 36
+GPR@R5   EQU   40           save area offset 40
+GPR@R6   EQU   44           save area offset 44
+GPR@R7   EQU   48           save area offset 48
+GPR@R8   EQU   52           save area offset 52
+GPR@R9   EQU   56           save area offset 56
+GPR@R10  EQU   60           save area offset 60
+GPR@R11  EQU   64           save area offset 64
+GPR@R12  EQU   72           save area offset 72
+*
+**       Register Equates
+*
+R0       EQU   0            general REG 0
+R1       EQU   1            general REG 1
+R2       EQU   2            general REG 2
+R3       EQU   3            general REG 3
+R4       EQU   4            general REG 4
+R5       EQU   5            general REG 5
+R6       EQU   6            general REG 6
+R7       EQU   7            general REG 7
+R8       EQU   8            general REG 8
+R9       EQU   9            general REG 9
+R10      EQU   10           general REG 10
+R11      EQU   11           general REG 11
+R12      EQU   12           general REG 12
+R13      EQU   13           general REG 13
+R14      EQU   14           general REG 14
+R15      EQU   15           general REG 15
+*
+AR0      EQU   0            access REG 0
+AR1      EQU   1            access REG 1
+AR2      EQU   2            access REG 2
+AR3      EQU   3            access REG 3
+AR4      EQU   4            access REG 4
+AR5      EQU   5            access REG 5
+AR6      EQU   6            access REG 6
+AR7      EQU   7            access REG 7
+AR8      EQU   8            access REG 8
+AR9      EQU   9            access REG 9
+AR10     EQU   10           access REG 10
+AR11     EQU   11           access REG 11
+AR12     EQU   12           access REG 12
+AR13     EQU   13           access REG 13
+AR14     EQU   14           access REG 14
+AR15     EQU   15           access REG 15
+*
+HR0      EQU   0            high REG 0
+HR1      EQU   1            high REG 1
+HR2      EQU   2            high REG 2
+HR3      EQU   3            high REG 3
+HR4      EQU   4            high REG 4
+HR5      EQU   5            high REG 5
+HR6      EQU   6            high REG 6
+HR7      EQU   7            high REG 7
+HR8      EQU   8            high REG 8
+HR9      EQU   9            high REG 9
+HR10     EQU   10           high REG 10
+HR11     EQU   11           high REG 11
+HR12     EQU   12           high REG 12
+HR13     EQU   13           high REG 13
+HR14     EQU   14           high REG 14
+HR15     EQU   15           high REG 15
+*
+**       General equates
+*
+XFF      EQU   X'FF'        foxes
+XZERO    EQU   X'00'        hex zero
+ENDVL    EQU   X'80'        end-of-list indicator
+AMODE31  EQU   X'80'        AMODE=31 indicator
+*
+BLANK    EQU   C' '         blank
+PUNTO    EQU   C'.'         period
+COMMA    EQU   C','         comma
+COLON    EQU   C':'         colon
+QUOTE    EQU   C''''        quote
+OPAREN   EQU   C'('         open paren
+CPAREN   EQU   C')'         close paren
+DASH     EQU   C'-'         dash
+SLASH    EQU   C'/'         slash
+EQUAL    EQU   C'='         equal
+COMMENT  EQU   C'*'         comment record
+GENERIC  EQU   C'*'         generic character
+DOLLAR   EQU   C'$'         dollar
+STAR     EQU   C'*'         *asterisk
+ASHTAG   EQU   C'#'         ashtag
+ATSIGN   EQU   C'@'         @sign
+ALPHA    EQU   C'A'         alpha
+ZEBRA    EQU   C'Z'         alpha
+ZERO     EQU   C'0'         decimal 0
+FOXZERO  EQU   C'0'         decimal 0
+NINE     EQU   C'9'         decimal 9
+FOXNINE  EQU   C'9'         decimal 9
+*
+**       Allocation codes
+*
+OLD      EQU   X'01'        DISP=OLD allocation
+MOD      EQU   X'02'        DISP=MOD allocation
+NEW      EQU   X'04'        DISP=NEW allocation
+SHR      EQU   X'08'        DISP=SHR allocation
+*
+**       Return Codes
+*
+RC0      EQU   X'00000000'  Successful RC
+RC4      EQU   X'00000004'  Warning RC
+RC8      EQU   X'00000008'  Error RC
+RC12     EQU   X'00000012'  Subsystem server error
+*
+**       Reason Codes
+*
+RSN0     EQU   X'00000000'  Request Successful
+RSN4     EQU   X'00000004'  EMFINI -PARMLIB(master) open failed
+RSN8     EQU   X'00000008'  EMFINI -PARMLIB(member) open failed
+RSN12    EQU   X'00000012'  EMFINI -Invalid subsysytem name specified
+RSN16    EQU   X'00000016'  EMFINI -Unsupported system exit specified
+RSN20    EQU   X'00000020'  EMFINI -ESTAE recovery environment failed
+RSN24    EQU   X'00000024'  EMFINI -Mainline abnormally terminated
+RSN28    EQU   X'00000028'  EMFINI -INIEXIT abnormally terminated
+RSN32    EQU   X'00000032'  EMFCMD -Mainline abnormaly terminated
+RSN36    EQU   X'00000036'  EMFMSG -Mainline abnormally terminated
+RSN40    EQU   X'00000040'  EMFINI -Free resource abnormally terminated
+RSN44    EQU   X'00000044'  EMFINI -PARMLIB(member) no records found
+RSN48    EQU   X'00000048'  EMFEOM -EOM listener abnormally terminated
+RSN52    EQU   X'00000052'  EMFEOM -EOM listener recovery retry reset
+RSN56    EQU   X'00000056'  EMFCMD -invalid input received by MODEXIT
+RSN60    EQU   X'00000060'  EMFINI -MSTR table overflow error
+RSN64    EQU   X'00000064'  EMFCSM -MSTE table overflow error
+RSN68    EQU   X'00000068'  EMFINI -DELEXIT invalid MSTE table entry
+RSN72    EQU   X'00000072'  EMFINI -Invalid initialization option found
+RSN76    EQU   X'00000076'  EMFCSM -MODEXIT state change failed
+RSN80    EQU   X'00000080'  EMFINI -PREDEL version mismatch error
+RSN84    EQU   X'00000084'  EMFCSM -MODAXQE invalid state change req
+RSN88    EQU   X'00000088'  EMFCSM -MODIXQE invalid state change req
+RSN92    EQU   X'00000092'  EMFCSM -MODZXQE invalid state change req
+RSN96    EQU   X'00000096'  ?????? -available
+*
+RSN100   EQU   X'00000100'  EMFXIT -available
+RSN104   EQU   X'00000104'  EMFXIT -ZEMF subsystem not operational
+RSN108   EQU   X'00000108'  EMFXIT -ESTAE environment create failed
+RSN112   EQU   X'00000112'  EMFXIT -Abnormally terminated (ESTAEX)
+RSN116   EQU   X'00000116'  EMFXIT -Exit name not found in XITTABLE
+RSN120   EQU   X'00000120'  EMFXIT -Abnormally terminated (XITEXIT)
+RSN124   EQU   X'00000124'  EMFXIT -CSCB scan terminated bnormally
+RSN128   EQU   X'00000128'  EMFXIT -JOBPAR invalid ZXQE jobname found
+RSN132   EQU   X'00000132'  EMFXIT -GETVAR unknown variable found
+RSN136   EQU   X'00000136'  EMFXIT -Abnormally terminated (FRR)
+RSN140   EQU   X'00000140'  EMFXIT -available
+RSN144   EQU   X'00000144'  EMFXIT -available
+RSN148   EQU   X'00000148'  EMFXIT -available
+RSN152   EQU   X'00000152'  EMFXIT -available
+RSN156   EQU   X'00000156'  EMFXIT -available
+RSN160   EQU   X'00000160'  EMFXIT -available
+RSN164   EQU   X'00000164'  EMFXIT -available
+RSN168   EQU   X'00000168'  EMFXIT -available
+RSN172   EQU   X'00000172'  EMFXIT -available
+RSN176   EQU   X'00000176'  EMFXIT -available
+RSN180   EQU   X'00000180'  EMFXIT -available
+RSN184   EQU   X'00000184'  EMFXIT -available
+RSN188   EQU   X'00000188'  EMFXIT -available
+RSN192   EQU   X'00000192'  EMFXIT -available
+RSN196   EQU   X'00000196'  EMFXIT -available
+*
+RSN200   EQU   X'00000200'  IEFUJI -Exit terminated abnormally
+RSN204   EQU   X'00000204'  IEFUSI -Exit terminated abnormally
+RSN208   EQU   X'00000208'  IEFUTL -Exit terminated abnormally
+RSN212   EQU   X'00000212'  IEFU83 -exit terminated abnormally
+RSN216   EQU   X'00000216'  IEFU86 -exit terminated abnormally
+RSN220   EQU   X'00000220'  IEFUSO -Exit terminated abnormally
+RSN224   EQU   X'00000224'  IEFUJP -Exit terminated abnormally
+RSN228   EQU   X'00000228'  IEFU29 -Exit terminated abnormally
+RSN232   EQU   X'00000232'  IEFU29L -Exit terminated abnormally
+RSN236   EQU   X'00000236'  IEFU84 -exit terminated abnormally
+RSN240   EQU   X'00000240'  IEFU85 -exit terminated abnormally
+RSN244   EQU   X'00000244'  ?????? -available
+RSN248   EQU   X'00000248'  ?????? -available
+RSN252   EQU   X'00000252'  ?????? -available
+RSN256   EQU   X'00000256'  ?????? -available
+RSN260   EQU   X'00000260'  ?????? -available
+RSN264   EQU   X'00000264'  ?????? -available
+RSN268   EQU   X'00000268'  ?????? -available
+RSN272   EQU   X'00000272'  ?????? -available
+RSN276   EQU   X'00000276'  ?????? -available
+RSN280   EQU   X'00000280'  ?????? -available
+RSN284   EQU   X'00000284'  ?????? -available
+RSN288   EQU   X'00000288'  ?????? -available
+RSN292   EQU   X'00000292'  ?????? -available
+RSN296   EQU   X'00000296'  ?????? -available
+*
+RSN300   EQU   X'00000300'  -available
+RSN304   EQU   X'00000304'  EMFCSM -ALLOC DAB failed validity check
+RSN308   EQU   X'00000308'  EMFCSM -PARMLIB dataset OPEN failed
+RSN312   EQU   X'00000312'  EMFCSM -PARMLIB READ buffer overflow error
+RSN316   EQU   X'00000316'  EMFCSM -MSTRPAR MSTR table overflow error
+RSN320   EQU   X'00000320'  EMFCSM -XMEMGET ZREC table overflow error
+RSN324   EQU   X'00000324'  EMFCSM -XMEMPAR invalid END record found
+RSN328   EQU   X'00000328'  EMFCSM -XMEMPAR ZREC failed validity check
+RSN332   EQU   X'00000332'  EMFCSM -XMEMPAR Invalid keyword found
+RSN336   EQU   X'00000336'  EMFCSM -XMEMPAR ZPAR table overflow error
+RSN340   EQU   X'00000340'  EMFCSM -XMEMPAR ZREC invalid stmt separator
+RSN344   EQU   X'00000344'  EMFCSM -XMEMPAR ZREC invalid parm string
+RSN348   EQU   X'00000348'  EMFPAR -Exit name not found in PARTABLE
+RSN352   EQU   X'00000352'  EMFCSM -XMEMQUE Invalid queue request
+RSN356   EQU   X'00000356'  EMFCSM -ADDEXIT invalid MSTR table entry
+RSN358   EQU   X'00000358'  EMFCSM -MODEXIT no dynamic exits defined
+RSN360   EQU   X'00000360'  EMFCSM -DELEXIT invalid MSTE table entry
+RSN362   EQU   X'00000362'  EMFCSM -ADDEXIT invalid MSTE table entry
+RSN364   EQU   X'00000364'  EMFCSM -EMFPAR invalid ZPARDATA found
+RSN368   EQU   X'00000368'  EMFCSM -EMFPAR duplicate ZXQE queued found
+RSN372   EQU   X'00000372'  EMFPAR -Invalid parmdata keyword specified
+RSN376   EQU   X'00000376'  EMFCSM -MODEXIT invalid MSTE table entry
+RSN380   EQU   X'00000380'  EMFPAR -zero XSA queue offset value found
+RSN384   EQU   X'00000384'  EMFPAR -mutually exclusive parameters found
+RSN388   EQU   X'00000388'  EMFPAR -Invalid command text specified
+RSN392   EQU   X'00000392'  EMFPAR -WARNWTO invalid parametr specified
+RSN396   EQU   X'00000396'  EMFPAR -OPTSMF invalid parameter specified
+*
+RSN400   EQU   X'00000400'  EMFPAR -DUMPMSG invalid parmdata specified
+RSN404   EQU   X'00000404'  EMFPAR -DUMPCMD invalid parmdata specified
+RSN408   EQU   X'00000408'  EMFCSM -XMEMPAR invalid SMF subsytem ID
+RSN412   EQU   X'00000412'  EMFPAR -Invalid SUPPREES=list specified
+RSN416   EQU   X'00000416'  EMFPAR -Invalid parmdata keyword specified
+RSN420   EQU   X'00000420'  EMFPAR -Exit not currently supported
+RSN424   EQU   X'00000424'  EMFINI -ZREC failed validity checks
+RSN428   EQU   X'00000428'  EMFINI -Invalid ZREC ADDEXIT keyword found
+RSN432   EQU   X'00000432'  EMFINI -invalid ZREC END keyword found
+RSN436   EQU   X'00000436'  EMFINI -ZPAR table overflow error
+RSN440   EQU   X'00000440'  EMFINI -ZREC invalid parameter string
+RSN444   EQU   X'00000444'  EMFINI -ZREC invalid statement separator
+RSN448   EQU   X'00000448'  EMFCMD -Invalid MSTE table entry detected
+         POP   PRINT
+*
+**       System data areas
+*
+         PRINT NOGEN
+         IHAPSA ,
+         IHAASCB ,
+         IHAASSB LIST=YES
+         IRAOUCB ,
+         IHAASXB ,
+         IHAACEE ,
+         IEZJSCB ,
+         IEESMCA ,
+         IHACDE ,
+         CVT   DSECT=YES,LIST=YES
+         IHAECVT LIST=YES
+         IHAPVT ,
+         IHASRB ,
+         IEFJESCT ,
+         IEFJSCVT ,
+         IEFJSSIB ,
+         IKJTCB DSECT=YES
+         IKJRB DSECT=YES
+         IHASTCB ,
+         IHAXSB LIST=YES
+         ICHSAFP ,
+         IEEBASEA ,
+CSCB     DSECT ,
+         IEECHAIN ,
+         IHAFRRS ,
+         IHASDWA ,
+         CSVEXAA ,
+         CSVEXRET ,
+         CSVLPRET LIST=YES
+         IEFJSIPL ,
+         IEANTASM ,
+         IEZVG100 ,
+         IEZBITS ,
+         IEFZB4D0 ,
+         IEFZB4D2 ,
+         IEZWPL DSECT=YES
+RBLEN    EQU   (S99RBEND-S99RB)
+         IHADECB DSECT=YES
+         MEND  ,

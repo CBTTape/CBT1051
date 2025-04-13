@@ -1,0 +1,76 @@
+***********************************************************************
+*                                                                     *
+* IEFU85 - SMF record exit                                            *
+*  Receives control to determine if SMF is to write the SMF record    *
+*  to the SMF dataset.                                                *
+*                                                                     *
+* You can use IEFU85 to:                                              *
+*  - Suppress selected records from being written to SMF              *
+*  - Issue warning WTO messages                                       *
+*                                                                     *
+* Supported Subsystems:                                               *
+*  - STC                                                              *
+*  - TSO                                                              *
+*  - JOB (JES2, JES3)                                                 *
+*  - ASCH                                                             *
+*  - OMVS                                                             *
+*                                                                     *
+***********************************************************************
+*
+JOB(PROD*,              PRODUCTION JOBS
+    SUPPRESS=NO,         do not suppress SMF records
+    WARNWTO=NO)          do not issue warning message
+*
+JOB(TEST*,              TEST JOBS
+    SUPPRESS=7,17,27,    suppress type 7,17,27 SMF records
+    WARNWTO=YES)         issue warning message
+*
+STC(*,                  STARTED TASKS
+    SUPPRESS=NO,         do not suppress SMF records
+    WARNWTO=NO)          do not issue warning message
+*
+TSO(*,                  TIME SHARING USERS
+    SUPPRESS=40,         suppress type 40 DD dynamic allocation records
+    WARNWTO=NO)          do not issue warning message
+*
+*
+***********************************************************************
+*                                                                     *
+* CODING CONVENTIONS:                                                 *
+*                                                                     *
+*  Syntax:                                                            *
+*   Separate parameters with commas.                                  *
+*   Enclose list of parameters within parenthesis.                    *
+*                                                                     *
+*  Parameters:                                                        *
+*   ({JOB|STC|TSO|ASCH|OMVS},                                         *
+*    SUPPRESS={NO|number,number,...},                                 *
+*    WARNWTO={NO|YES},                                                *
+*    COMMAND={'command-text'})                                        *
+*                                                                     *
+*  Description:                                                       *
+*   SUPPRESS={NO|number,number,...}                                   *
+*    Specifies the SMF record type to be suppressed.                  *
+*    There is no defult. You must specify NO or record type.          *
+*                                                                     *
+*   Examples:                                                         *
+*    SUPPRESS=NO        -do not suppress SMF records.                 *
+*    SUPPRESS=40        -suppress SMF record type 40.                 *
+*    SUPPRESS=27,255    -suppress SMF records 27 and 255.             *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* WARNWTO={NO|YES}                                                    *
+*  Specifies the WTO message option. If not specified the default     *
+*  is WARNWTO=NO. WARNWTO=YES allows the subsystem server to issue    *
+*  a warning WTO message for suppressed SMF records.                  *
+*                                                                     *
+*  Examples:                                                          *
+*   WARNWTO=NO   -subsystem server does not issue warning WTO message *
+*   WARNWTO=YES  -subsystem server issues warning WTO message         *
+*                                                                     *
+*  Message Examples:                                                  *
+*   ZEMF85W JOB jobname - SMF type nnnn record suppressed             *
+*                                                                     *
+***********************************************************************
+*

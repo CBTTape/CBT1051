@@ -1,0 +1,66 @@
+//$RACF    JOB ...
+//*
+//*******************************************************************/
+//*                                                                 */
+//* Optional zEMF security implementation                           */
+//*                                                                 */
+//*  This JCL procedure defines resource class $ZEMFCLS to RACF.    */
+//*                                                                 */
+//*    STEP1: Defines the $ZEMFCLS to the RACF class descriptor     */
+//*           table.                                                */
+//*                                                                 */
+//*    STEP2: Issues RACF command to activate class $ZEMFCLS.       */
+//*                                                                 */
+//*    STEP3: Issues RACF command to RACLIST class $ZEMFCLS.        */
+//*                                                                 */
+//*    STEP4: Defines the ZEMF.SERVER.CMD resource name.            */
+//*                                                                 */
+//*    STEP5: Example of granting permission to selected users.     */
+//*                                                                 */
+//*******************************************************************/
+//*
+//*   RDEFINE $ZEMFCLS
+//*
+//STEP1    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ RDEFINE CDT $ZEMFCLS UACC(NONE) +
+    CDTINFO(DEFAULTUACC(NONE) FIRST(NATIONAL) MAXLENGTH(32) +
+    OTHER(ALPHA,NUMERIC,SPECIAL) POSIT(128) RACLIST(ALLOWED) +
+    SECLABELSREQUIRED(YES))
+/*
+//*
+//*   Activate $ZEMFCLS
+//*
+//STEP2    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ SETROPTS CLASSACT($ZEMFCLS)
+/*
+//*
+//*   RACLIST $ZEMFCLS
+//*
+//STEP3    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ SETROPTS RACLIST(CDT) REFRESH
+/*
+//*
+//*   RDEFINE zEMF resource profiles
+//*
+//STEP4    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ RDEFINE $ZEMFCLS ZEMF.SERVER.CMD UACC(NONE)
+/*
+//*
+//*  Grant READ access to zEMF command users
+//*
+//STEP5    EXEC PGM=IKJEFT01,DYNAMNBR=30,REGION=0M
+//SYSTSPRT  DD SYSOUT=*
+//SYSTSIN   DD *
+ PERMIT  ZEMF.SERVER.CMD CLASS($ZEMFCLS) ID(userid1) ACCESS(READ)
+ PERMIT  ZEMF.SERVER.CMD CLASS($ZEMFCLS) ID(userid2) ACCESS(READ)
+ PERMIT  ZEMF.SERVER.CMD CLASS($ZEMFCLS) ID(userid3) ACCESS(READ)
+/*
+//

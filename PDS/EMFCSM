@@ -1,0 +1,2834 @@
+EMFCSM   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         EMFCSM                                             */
+*/*                                                                  */
+*/* Function:     Subsystem server common service routines           */
+*/*                                                                  */
+*/* Description:  Contains common subsystem server service routines. */
+*/*               These routines can be called from service callers  */
+*/*               executing in any address space.                    */
+*/*                                                                  */
+*/* Restrictions: Documented in the flower box of each service       */
+*/*               routine.                                           */
+*/*                                                                  */
+*/* Entry Point:  ADDEXIT  - Add Dynamic Exits Facility exit         */
+*/*               MODEXIT  - Modify Dynamic Exits Facility exit      */
+*/*               DELEXIT  - Delete Dynamic Exits Facility exit      */
+*/*               ALLOC    - Dynamic allocation                      */
+*/*               DEALLOC  - Dynamic unallocation                    */
+*/*               ALLOCRT  - Dynamic allocation retrieval            */
+*/*               GETLOCL  - Obtain LOCAL address space lock         */
+*/*               FRELOCL  - Release LOCAL address space lock        */
+*/*               GETCMS   - Obtain LOCAL and CMS locks              */
+*/*               FRECMS   - Release CMS and LOCAL locks             */
+*/*               SETPASN  - Set non-cross-memory mode               */
+*/*               SETSASN  - Set cross-memory mode                   */
+*/*               GETTABS  - Get PARMLIB exit tables                 */
+*/*               FRETABS  - Free PARMLIB exit tables                */
+*/*               XMEMPAR  - Parse PARMLIB exit member               */
+*/*               XMEMQUE  - Queue common ZXQE element               */
+*/*               TRACE    - Internal subsystem server trace         */
+*/*                                                                  */
+*/* Recovery:     The service routines donot create a recovery       */
+*/*               environment. If recovery is needed, it must be     */
+*/*               established by the service routine caller prior    */
+*/*               to calling the service routine.                    */
+*/*                                                                  */
+*/* Attributes:   Reentrant                                          */
+*/*               Page-fixed                                         */
+*/*               Write-protected                                    */
+*/*               Dynamic-LPA resident                               */
+*/*                                                                  */
+*/* Copyright:    Ben Marino. 2021 - 2024 (unpublished)              */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+EMFCSM   AMODE 31
+EMFCSM   RMODE ANY
+         COPY  ZGBLS
+         ZMACS GEN=MID,DSECT=NO        MID
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         GETCMS                                             */
+*/*                                                                  */
+*/* Function:     Obtain LOCAL and CMS locks                         */
+*/*                                                                  */
+*/* Description:  Serializes cross-memory supervisor resources       */
+*/*                                                                  */
+*/* Restrictions: Routine runs without a savearea                    */
+*/*                                                                  */
+*/* Input Regs:   R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB/SRB mode                                       */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Key zero                                           */
+*/*               Supervisor state                                   */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+GETCMS   ZMACS GEN=SRVENTY,SAVE=NO     entry
+         USING ZEVT,R11
+         ZTRCE CSM=A,LINKAGE=LOCAL     trace
+*
+         SETLOCK OBTAIN,TYPE=LOCAL,REGS=USE,MODE=UNCOND,               +
+               RELATED=('Serialize local supervisor resources')
+*
+         SETLOCK OBTAIN,TYPE=CMS,REGS=USE,MODE=UNCOND,                 +
+               RELATED=('Serialize cross-memory resources')
+*
+GETCMXIT DS    0H
+         XR    R15,R15                 RC
+         ZMACS GEN=SRVEXIT,RESTORE=NO  exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         FRECMS                                             */
+*/*                                                                  */
+*/* Function:     Release CMS and LOCAL locks                        */
+*/*                                                                  */
+*/* Description:  Unserializes cross-memory supervisor resources     */
+*/*                                                                  */
+*/* Restrictions: Routine runs without a savearea                    */
+*/*                                                                  */
+*/* Input Regs:   R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Output Regs:  R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB/SRB mode                                       */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Key zero                                           */
+*/*               Supervisor state                                   */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+FRECMS   ZMACS GEN=SRVENTY,SAVE=NO     entry
+         USING ZEVT,R11
+         ZTRCE CSM=B,LINKAGE=LOCAL     trace
+*
+         SETLOCK RELEASE,TYPE=CMS,REGS=USE,                            +
+               RELATED=('Unserialize cross-memory resources')
+*
+         SETLOCK RELEASE,TYPE=LOCAL,REGS=USE,                          +
+               RELATED=('Unserialize local supervisor resources')
+*
+FRECMXIT DS    0H
+         XR    R15,R15                 RC
+         ZMACS GEN=SRVEXIT,RESTORE=NO  exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         GETLOCL                                            */
+*/*                                                                  */
+*/* Function:     Obtain LOCAL address space lock                    */
+*/*                                                                  */
+*/* Description:  Serializes local address space supervisor          */
+*/*               resources.                                         */
+*/*                                                                  */
+*/* Restrictions: Routine runs without a savearea                    */
+*/*                                                                  */
+*/* Input Regs:   R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB/SRB mode                                       */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Key zero                                           */
+*/*               Supervisor state                                   */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+GETLOCL  ZMACS GEN=SRVENTY,SAVE=NO     entry
+         USING ZEVT,R11
+         ZTRCE CSM=C,LINKAGE=LOCAL     trace
+*
+         SETLOCK OBTAIN,TYPE=LOCAL,REGS=USE,MODE=UNCOND,               +
+               RELATED=('Serialize local supervisor resources')
+*
+GETLKXIT DS    0H
+         XR    R15,R15                 RC
+         ZMACS GEN=SRVEXIT,RESTORE=NO  exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         FRELOCL                                            */
+*/*                                                                  */
+*/* Function:     Release LOCAL address space lock                   */
+*/*                                                                  */
+*/* Description:  Unserializes local address space supervisor        */
+*/*               resources.                                         */
+*/*                                                                  */
+*/* Restrictions: Routine runs without a savearea                    */
+*/*                                                                  */
+*/* Input Regs:   R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Output Regs:  R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB/SRB mode                                       */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Key zero                                           */
+*/*               Supervisor state                                   */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+FRELOCL  ZMACS GEN=SRVENTY,SAVE=NO     entry
+         USING ZEVT,R11
+         ZTRCE CSM=D,LINKAGE=LOCAL     trace
+*
+         SETLOCK RELEASE,TYPE=LOCAL,REGS=USE,                          +
+               RELATED=('Unserialize local supervisor resources')
+*
+FRELKXIT DS    0H
+         XR    R15,R15                 RC
+         ZMACS GEN=SRVEXIT,RESTORE=NO  exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         ADDEXIT                                            */
+*/*                                                                  */
+*/* Function:     Add Dynamic Exits Facility exit routine            */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  XSA  address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R7  MSTE address                                   */
+*/*               R8  MSTR address                                   */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R0  Reason code                                    */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ADDEXIT  ZMACS GEN=SRVENTY             entry
+         USING ZEVT,R11                ZEVT
+*
+**       Update entry count
+*
+ADDX000  DS    0H
+         L     R2,ZEVTADDC             count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTADDC          update count
+         BNE   ADDX000                 changed: try again
+         ZTRCE DYN=A,LINKAGE=LOCAL     trace
+*
+**       Validity check MSTE entry
+*
+         L     R7,ZEVTMSTE             MSTE address
+         USING MSTE,R7
+         CLC   MSTEID,=CL4'MSTE'       valid?
+         BE    ADDX005                 yes
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN362)     RSN
+         ZWTO  MID=ZEMF26E,PLIST=XSAPLST,                              +
+               V1==CL4'MSTE',V2=XSARC,V3=XSARSN
+         ZTRCE DYN=B,LINKAGE=LOCAL     trace
+         B     ADDXEXIT                exit
+*
+ADDX005  DS    0H
+         ICM   R8,15,XSAMSTRA          MSTR table init?
+         BZ    ADDXEXIT                no, exit
+         ZTRCE DYN=C,LINKAGE=LOCAL     trace
+         ICM   R6,15,XSAMSTRC          MSTR entries?
+         BZ    ADDXEXIT                no, exit
+         ZTRCE DYN=D,LINKAGE=LOCAL     trace
+*
+**       MSTR table entries loop
+*
+ADDX010  DS    0H
+         USING MSTR,R8
+         CLC   MSTETEND,=AL4(-1)       MSTE table end?
+         BE    ADDXERR                 yes, error
+         ZTRCE DYN=E,LINKAGE=LOCAL     trace
+*
+ADDX015  DS    0H
+         CLC   MSTRID,=CL4'MSTR'       MSTR?
+         BE    ADDX020                 yes
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN356)     RSN
+         ZWTO  MID=ZEMF26E,PLIST=XSAPLST,                              +
+               V1==CL4'MSTR',V2=XSARC,V3=XSARSN
+         ZTRCE DYN=F,LINKAGE=LOCAL     trace
+         B     ADDXEXIT                exit
+*
+**       Validity check exit state
+*
+ADDX020  DS    0H
+         CLC   MSTETEND,=AL4(-1)       MSTE table end?
+         BE    ADDXERR                 yes, error
+&STATE   SETC  'ACTIVE'                default state
+         TM    MSTRSTAT,MSTR@ACT       STATE=ACTIVE?
+         BNZ   ADDX030                 yes
+&STATE   SETC  'INACTIVE'              no
+         ZTRCE DYN=G,LINKAGE=LOCAL     trace
+*
+**       Validity check exit position
+*
+ADDX030  DS    0H
+&POS     SETC  'FIRST'                 position
+         TM    MSTRPOS,MSTR@1ST        POS=FIRST?
+         BNZ   ADDX040                 yes
+&POS     SETC  'SYSTEM'                position
+         TM    MSTRPOS,MSTR@SYS        POS=SYSTEM?
+         BNZ   ADDX040                 yes
+&POS     SETC  'LAST'                  POS=LAST default
+         ZTRCE DYN=H,LINKAGE=LOCAL     trace
+*
+**       Add SYS dynamic exit
+*
+ADDX040  DS    0H
+         CLI   MSTRSYS,MSTR@YES        SYS=YES?
+         BNE   ADDX050                 no
+         XC    MSTETEND,MSTETEND       clear free indicator
+         MVC   MSTENAME,MSTRNAME       SMF exit member name
+         MVC   MSTEXITN,MSTRDYNM       SYS dynamic exit name
+         MVC   MSTEMODN,MSTREXIT       ZEMF SYS dynamic exit name
+         MVC   MSTESTAT,MSTRSTAT       exit state
+         ZCALL SR=DYNXDEL              delete
+         ZCALL SR=DYNXADD              add
+         LTR   R15,R15                 successful?
+         BNZ   ADDXEXIT                no, exit
+         LA    R7,MSTE@SZE(,R7)        yes, next MSTE entry
+         ZTRCE DYN=I,LINKAGE=LOCAL     trace
+*
+**       Add SYSSTC dynamic exit
+*
+ADDX050  DS    0H
+         TM    MSTRSCOP,MSTR@STC       SYSSTC?
+         BZ    ADDX060                 no
+         CLC   MSTETEND,=CL4'FREE'     free entry?
+         BE    ADDX055                 yes, use it
+         CLC   MSTETEND,=AL4(-1)       MSTE table end?
+         BE    ADDXERR                 yes, error
+*
+ADDX055  DS    0H
+         XC    MSTETEND,MSTETEND       clear free indicator
+         MVC   MSTENAME,MSTRNAME       SMF exit member name
+         MVC   MSTEXITN,ZEVTBLKS       scrub exit name
+         MVC   MSTEXITN(L'SYSSTC),SYSSTC
+         MVC   MSTESTAT,MSTRSTAT       exit state
+         LA    R3,MSTEXITN             exit name address
+         LA    R3,L'SYSSTC(,R3)        skip keyword
+         MVC   0(8,R3),MSTRNAME        init exit member name
+         MVC   MSTEMODN,MSTREXIT       ZEMF module exit name
+         MVI   MSTEMODN+7,C'&ZEMFSTC'  exit module name suffix
+         ZCALL SR=DYNXDEL              delete
+         ZCALL SR=DYNXADD              add
+         LTR   R15,R15                 successful?
+         BNZ   ADDXEXIT                no, exit
+         LA    R7,MSTE@SZE(,R7)        next MSTE entry
+         ZTRCE DYN=J,LINKAGE=LOCAL     trace
+*
+**       Add SYSTSO dynamic exit
+*
+ADDX060  DS    0H
+         TM    MSTRSCOP,MSTR@TSO       SYSTSO?
+         BZ    ADDX070                 no
+         CLC   MSTETEND,=CL4'FREE'     free entry?
+         BE    ADDX065                 yes, use it
+         CLC   MSTETEND,=AL4(-1)       MSTE table end?
+         BE    ADDXERR                 yes, error
+*
+ADDX065  DS    0H
+         XC    MSTETEND,MSTETEND       clear free indicator
+         MVC   MSTENAME,MSTRNAME       SMF exit member name
+         MVC   MSTEXITN,ZEVTBLKS       scrub exit name
+         MVC   MSTEXITN(L'SYSTSO),SYSTSO
+         MVC   MSTESTAT,MSTRSTAT       exit state
+         LA    R3,MSTEXITN             exit name address
+         LA    R3,L'SYSTSO(,R3)        skip SUBSYS.
+         MVC   0(8,R3),MSTRNAME        init exit member name
+         MVC   MSTEMODN,MSTREXIT       ZEMF module exit name
+         MVI   MSTEMODN+7,C'&ZEMFTSO'  exit module name suffix
+         ZCALL SR=DYNXDEL              delete
+         ZCALL SR=DYNXADD              ADD
+         LTR   R15,R15                 successful?
+         BNZ   ADDXEXIT                no, exit
+         LA    R7,MSTE@SZE(,R7)        next MSTE entry
+         ZTRCE DYN=K,LINKAGE=LOCAL     trace
+*
+**       Add SYSJESN dynamic exit
+*
+ADDX070  DS    0H
+         TM    MSTRSCOP,MSTR@JES       SYSJESN?
+         BZ    ADDX080                 no
+         CLC   MSTETEND,=CL4'FREE'     free entry?
+         BE    ADDX075                 yes, use it
+         CLC   MSTETEND,=AL4(-1)       MSTE table end?
+         BE    ADDXERR                 yes, error
+*
+ADDX075  DS    0H
+         XC    MSTETEND,MSTETEND       clear free indicator
+         MVC   MSTENAME,MSTRNAME       SMF exit member name
+         MVC   MSTEXITN(L'SYSJESN),SYSJESN
+         MVC   MSTEXITN+3(4),ZEVTJESN  JES2/JES3
+         MVC   MSTESTAT,MSTRSTAT       exit state
+         LA    R3,MSTEXITN             exit name address
+         LA    R3,L'SYSJESN(,R3)       skip SUBSYS.
+         MVC   0(8,R3),MSTRNAME        init exit member name
+         MVC   MSTEMODN,MSTREXIT       ZEMF module exit name
+         MVI   MSTEMODN+7,C'&ZEMFJES'  exit module name suffix
+         ZCALL SR=DYNXDEL              delete
+         ZCALL SR=DYNXADD              add
+         LTR   R15,R15                 successful?
+         BNZ   ADDXEXIT                no, exit
+         LA    R7,MSTE@SZE(,R7)        next MSTE entry
+         ZTRCE DYN=L,LINKAGE=LOCAL     trace
+*
+**       Add SYSASCH dynamic exit
+*
+ADDX080  DS    0H
+         TM    MSTRSCOP,MSTR@ASC       SYSASCH?
+         BZ    ADDX090                 no
+         CLC   MSTETEND,=CL4'FREE'     free entry?
+         BE    ADDX085                 yes, use it
+         CLC   MSTETEND,=AL4(-1)       MSTE table end?
+         BE    ADDXERR                 yes, error
+*
+ADDX085  DS    0H
+         XC    MSTETEND,MSTETEND       clear free indicator
+         MVC   MSTENAME,MSTRNAME       SMF exit member name
+         MVC   MSTEXITN(L'SYSASCH),SYSASCH
+         MVC   MSTESTAT,MSTRSTAT       exit state
+         LA    R3,MSTEXITN             exit name address
+         LA    R3,L'SYSASCH(,R3)       skip SUBSYS.
+         MVC   0(8,R3),MSTRNAME        init exit member name
+         MVC   MSTEMODN,MSTREXIT       ZEMF module exit name
+         MVI   MSTEMODN+7,C'&ZEMFASC'  exit module name suffix
+         ZCALL SR=DYNXDEL              delete
+         ZCALL SR=DYNXADD              ADD
+         LTR   R15,R15                 successful?
+         BNZ   ADDXEXIT                no, exit
+         LA    R7,MSTE@SZE(,R7)        next MSTE entry
+         ZTRCE DYN=M,LINKAGE=LOCAL     trace
+*
+**       Add SYSOMVS dynamic exit
+*
+ADDX090  DS    0H
+         TM    MSTRSCOP,MSTR@OMV       SYSOMVS?
+         BZ    ADDX100                 no
+         CLC   MSTETEND,=CL4'FREE'     free entry?
+         BE    ADDX095                 yes, use it
+         CLC   MSTETEND,=AL4(-1)       MSTE table end?
+         BE    ADDXERR                 yes, error
+*
+ADDX095  DS    0H
+         XC    MSTETEND,MSTETEND       clear free indicator
+         MVC   MSTENAME,MSTRNAME       SMF exit member name
+         MVC   MSTEXITN(L'SYSOMVS),SYSOMVS
+         MVC   MSTESTAT,MSTRSTAT       exit state
+         LA    R3,MSTEXITN             exit name address
+         LA    R3,L'SYSOMVS(,R3)       skip SUBSYS.
+         MVC   0(8,R3),MSTRNAME        init exit member name
+         MVC   MSTEMODN,MSTREXIT       ZEMF module exit name
+         MVI   MSTEMODN+7,C'&ZEMFOMV'  exit module name suffix
+         ZCALL SR=DYNXDEL              delete
+         ZCALL SR=DYNXADD              add
+         LTR   R15,R15                 successful?
+         BNZ   ADDXEXIT                no, exit
+         LA    R7,MSTE@SZE(,R7)        next MSTE entry
+         ZTRCE DYN=N,LINKAGE=LOCAL     trace
+*
+**       MSTR and MSTE entries loop
+*
+ADDX100  DS    0H
+         LA    R8,MSTR@SZE(,R8)        next MSTR entry
+         BCT   R6,ADDX010              loop
+         CLC   MSTETEND,=CL4'FREE'     free entry?
+         BE    ADDX105                 yes, set table end
+         CLC   MSTETEND,=AL4(-1)       MSTE table end?
+         BE    ADDX999                 yes, exit
+         B     ADDXERR                 no, error
+*
+ADDX105  DS    0H
+         MVC   MSTETEND,=AL4(-1)       no, set table end
+         ZTRCE DYN=O,LINKAGE=LOCAL     trace
+*
+ADDX999  DS    0H
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+         ZTRCE DYN=P,LINKAGE=LOCAL     trace
+         B     ADDXEXIT                exit
+*
+ADDXERR  DS    0H
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN64)      RSN
+         ZWTO  MID=ZEMF32E,PLIST=XSAPLST,                              +
+               V1==CL4'MSTE',V2=XSARC,V3=XSARSN
+         ZTRCE DYN=Q,LINKAGE=LOCAL     trace
+*
+ADDXEXIT DS    0H
+         ZMACS GEN=SRVEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+SYSSTC   DC    CL7'SYSSTC.'
+SYSTSO   DC    CL7'SYSTSO.'
+SYSJESN  DC    CL8'SYSJESn.'
+SYSASCH  DC    CL8'SYSASCH.'
+SYSOMVS  DC    CL8'SYSOMVS.'
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         DELEXIT                                            */
+*/*                                                                  */
+*/* Function:     Delete Dynamic Exits Facility exit routine         */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  XSA  address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R7  MSTE address                                   */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R0  Reason code                                    */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+DELEXIT  ZMACS GEN=SRVENTY
+         USING MSTE,R7
+         USING ZEVT,R11
+*
+**       Update entry count
+*
+DELX000  DS    0H
+         L     R2,ZEVTDELC             count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTDELC          update count
+         BNE   DELX000                 changed: try again
+         ZTRCE DYN=R,LINKAGE=LOCAL     trace
+*
+**       Scan MSTE table entries
+*
+         ICM   R7,15,ZEVTMSTE          MSTE init?
+         BNZ   DELX010                 yes
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+         ZTRCE DYN=S,LINKAGE=LOCAL     trace
+         B     DELXXIT                 exit
+*
+**       Validity check MSTE entry
+*
+DELX010  DS    0H
+         CLC   MSTEID,=CL4'MSTE'       MSTE?
+         BE    DELX020                 yes
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN360)     RSN
+         ZWTO  MID=ZEMF26E,PLIST=XSAPLST,                              +
+               V1==CL4'MSTE',V2=XSARC,V3=XSARSN
+         ZTRCE DYN=T,LINKAGE=LOCAL     trace
+         B     DELXXIT                 exit
+*
+**       Delete dynamic exit routine
+*
+DELX020  DS    0H
+         CLC   MSTETEND,=CL4'FREE'     free entry?
+         BE    DELX099                 yes, next entry
+         MVC   XSAFUNC,=CL8'delete'
+         CSVDYNEX REQUEST=DELETE,                                      +
+               EXITNAME=MSTEXITN,      dynamic exit name               +
+               MODNAME=MSTEMODN,       ZEMF exit module name           +
+               FORCE=NO,               inactivate exit                 +
+               RETCODE=XSARC,          RC                              +
+               RSNCODE=XSARSN,         RSN                             +
+               MF=(E,XSAPLST)
+         CLC   XSARC,=AL4(CSVDYNEXRC_OK) successful?
+         BE    DELX050                 yes
+         CLC   XSARC,=AL4(CSVDYNEXRC_WARN) warning?
+         BNE   DELX030                 no
+         CLC   XSARSN,=AL4(CSVDYNEXRSNDOESNOTEXIST)
+         BNE   DELX030                 no
+         XC    XSARC,XSARC             yes
+         ZTRCE DYN=U,LINKAGE=LOCAL     trace
+         B     DELX099                 next MSTE entry
+*
+**       Dynamic exit delete failed
+*
+DELX030  DS    0H
+         CLC   XSARSN,=AL4(CSVDYNEXRSNEXITNAMENOTFOUND)
+         BNE   DELX040                 error
+         XC    XSARC,XSARC             RC
+         ZTRCE DYN=V,LINKAGE=LOCAL     trace
+         B     DELX099                 next MSTE entry
+*
+DELX040  DS    0H
+         ZWTO  MID=ZEMF39E,PLIST=XSAPLST,                              +
+               V1=MSTEXITN,            dynamic exit name               +
+               V2=MSTEMODN,            exit name                       +
+               V3=XSAFUNC,             function                        +
+               V4=XSARC,               RC                              +
+               V5=XSARSN               RSN
+         ZTRCE DYN=W,LINKAGE=LOCAL     trace
+         B     DELX099                 next MSTE entry
+*
+**       Dynamic exit delete successful
+*
+DELX050  DS    0H
+         XC    XSARC,XSARC             RC
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BZ    DELX099                 no, slip msg
+         ZWTO  MID=ZEMF21I,PLIST=XSAPLST,                              +
+               V1=MSTEMODN,            exit name                       +
+               V2==CL12'deleted from', function                        +
+               V3=MSTEXITN             SYS dynamic exit name
+         ZTRCE DYN=X,LINKAGE=LOCAL     trace
+*
+**       Process next MSTE table entry
+*
+DELX099  DS    0H
+         CLC   MSTETEND,=AL4(-1)       last entry?
+         BE    DELXXIT                 yes, exit
+         LA    R7,MSTE@SZE(,R7)        next MSTE entry
+         CLC   MSTETEND,=AL4(-1)       last entry?
+         BNE   DELX010                 no, loop
+         XC    XSARC,XSARC             RC
+         ZTRCE DYN=Y,LINKAGE=LOCAL     trace
+*
+DELXXIT  DS    0H
+         ZMACS GEN=SRVEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         MODEXIT                                            */
+*/*                                                                  */
+*/* Function:     Modify Dynamic Exits Facility exit routine         */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  XSA  address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R6  ZQUE address                                   */
+*/*               R7  MSTE address                                   */
+*/*               R8  ZXQE address                                   */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R0  Reason code                                    */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+MODEXIT  ZMACS GEN=SRVENTY             entry
+         USING MSTE,R7                 MSTE
+         USING ZXQE,R8                 ZXQE
+         USING ZEVT,R11                ZEVT
+*
+**       Update entry count
+*
+MODX000  DS    0H
+         L     R2,ZEVTMODC             count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTMODC          update count
+         BNE   MODX000                 changed: try again
+         ZTRCE DYN=0,LINKAGE=LOCAL     trace
+*
+**       Scan MSTE table entries
+*
+         ICM   R7,15,ZEVTMSTE          MSTE init?
+         BNZ   MODX010                 yes
+         ZWTO  MID=ZEMF42E,PLIST=XSAPLST
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN358)     RSN
+         B     MODXXIT                 exit
+*
+**       Validity check MSTE entry
+*
+MODX010  DS    0H
+         USING MSTE,R7
+         CLC   MSTEID,=CL4'MSTE'       MSTE
+         BE    MODX015                 yes
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN360)     RSN
+         ZWTO  MID=ZEMF26E,PLIST=XSAPLST,                              +
+               V1==CL4'MSTE',V2=XSARC,V3=XSARSN
+         B     MODXXIT                 exit
+*
+**       Locate target MSTE entry
+*
+MODX015  DS    0H
+         TM    XSAFLG2,XSA@ALLX        all exits request?
+         BNZ   MODX020                 yes
+         CLC   XSAEXIT,MSTENAME        SMF exit name match?
+         BNE   MODX065                 no, next entry
+*
+**       Activate dynamic exit
+*
+MODX020  DS    0H
+         MVC   XSAXNAME,MSTENAME       copy exit name
+         TM    XSAFLG2,XSA@ACTX        active request?
+         BZ    MODX040                 no
+         MVC   XSAJOBNM,ZEVTBLKS       any job
+         CSVDYNEX REQUEST=MODIFY,      modify                          +
+               EXITNAME=MSTEXITN,      dynamic exit name               +
+               MODNAME=MSTEMODN,       ZEMF exit module name           +
+               STATE=ACTIVE,           exit state                      +
+               JOBNAME=XSAJOBNM,       job name                        +
+               RETCODE=XSARC,          RC                              +
+               RSNCODE=XSARSN,         RSN                             +
+               MF=(E,XSAPLST)
+         ZTRCE DYN=1,LINKAGE=LOCAL     trace
+*
+**       Check service request RC/RSN
+*
+         CLC   XSARC,=AL4(CSVDYNEXRC_OK) successful?
+         BE    MODX030                 yes
+         CLC   XSARC,=AL4(CSVDYNEXRC_WARN) warning?
+         BNE   MODX025                 no, error
+         CLC   XSARSN,=AL4(CSVDYNEXRSNDOESNOTEXIST)
+         BE    MODX065                 doesn't exist
+         ZTRCE DYN=2,LINKAGE=LOCAL     trace
+         B     MODXERR                 error
+*
+MODX025  DS    0H
+         CLC   XSARC,=AL4(CSVDYNEXRC_INVPARM)
+         BNE   MODXERR                 error
+         CLC   XSARSN,=AL4(CSVDYNEXRSNEXITNAMENOTFOUND)
+         BNE   MODXERR                 error
+         ZTRCE DYN=3,LINKAGE=LOCAL     trace
+         B     MODX065                 loop
+*
+**       Update target ZXQE exit queue
+*
+MODX030  DS    0H
+         OI    XSAFLG1,XSA@CHNG        state changed
+         TM    XSAFLG2,XSA@ALLX        all exits request?
+         BNZ   MODX035                 yes, skip call
+         ZCALL SR=MODAXQE              update ZXQE queue
+         LTR   R15,R15                 successful?
+         BNZ   MODXERR                 no, error
+         OI    MSTESTAT,MSTR@ACT       update MSTE entry
+*
+**       Dynamic exit state changed msg
+*
+MODX035  DS    0H
+         ZWTO  MID=ZEMF23I,PLIST=XSAPLST,                              +
+               V1=MSTEXITN,            exit name                       +
+               V2=XSASTATE             exit state
+         ZTRCE DYN=4,LINKAGE=LOCAL     trace
+         B     MODX065                 carry on
+*
+**       Inactivate dynamic exit
+*
+MODX040  DS    0H
+         TM    XSAFLG2,XSA@INAX        inactive request?
+         BNZ   MODX045                 yes
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN56)      RSN
+         ZTRCE DYN=5,LINKAGE=LOCAL     trace
+         B     MODXXIT                 exit
+*
+MODX045  DS    0H
+         MVC   XSAJOBNM,ZEVTBLKS       any job
+         CSVDYNEX REQUEST=MODIFY,      modify                          +
+               EXITNAME=MSTEXITN,      dynamic exit name               +
+               MODNAME=MSTEMODN,       ZEMF exit module name           +
+               STATE=INACTIVE,         exit state                      +
+               JOBNAME=XSAJOBNM,       job name                        +
+               RETCODE=XSARC,          RC                              +
+               RSNCODE=XSARSN,         RSN                             +
+               MF=(E,XSAPLST)
+         ZTRCE DYN=6,LINKAGE=LOCAL     trace
+*
+**       Check service request RC/RSN
+*
+         CLC   XSARC,=AL4(CSVDYNEXRC_OK) successful?
+         BE    MODX055                 yes
+         CLC   XSARC,=AL4(CSVDYNEXRC_WARN) warning?
+         BNE   MODX050                 no, error
+         CLC   XSARSN,=AL4(CSVDYNEXRSNDOESNOTEXIST)
+         BE    MODX065                 doesn't exist
+         ZTRCE DYN=7,LINKAGE=LOCAL     trace
+         B     MODXERR                 error
+*
+MODX050  DS    0H
+         CLC   XSARC,=AL4(CSVDYNEXRC_INVPARM)
+         BNE   MODXERR                 error
+         CLC   XSARSN,=AL4(CSVDYNEXRSNEXITNAMENOTFOUND)
+         BNE   MODXERR                 error
+         ZTRCE DYN=8,LINKAGE=LOCAL     trace
+         B     MODX065                 loop
+*
+**       Modify ZXQE exit queue state
+*
+MODX055  DS    0H
+         OI    XSAFLG1,XSA@CHNG        state changed
+         TM    XSAFLG2,XSA@ALLX        all exits request?
+         BNZ   MODX060                 yes, skip call
+         ZCALL SR=MODIXQE              update ZXQE queue
+         LTR   R15,R15                 successful?
+         BNZ   MODXERR                 no, error
+         NI    MSTESTAT,XFF-MSTR@ACT   update MSTE entry
+*
+**       Dynamic exit state changed msg
+*
+MODX060  DS    0H
+         ZWTO  MID=ZEMF23I,PLIST=XSAPLST,                              +
+               V1=MSTEXITN,            exit name                       +
+               V2=XSASTATE             exit state
+*
+**       Process next MSTE table entry
+*
+MODX065  DS    0H
+         LA    R7,MSTE@SZE(,R7)        next MSTE entry
+         CLC   MSTETEND,=AL4(-1)       last entry?
+         BNE   MODX010                 no, loop
+         ZTRCE DYN=9,LINKAGE=LOCAL     trace
+*
+**       Update all ZXQE exit queues
+*
+         TM    XSAFLG2,XSA@ALLX        all exits request?
+         BZ    MODX070                 no
+         ZCALL SR=MODZXQE              update all ZXQE queues
+         LTR   R15,R15                 successful?
+         BNZ   MODXERR                 no, error
+         ZTRCE DYN=$,LINKAGE=LOCAL     trace
+*
+**       Update exit-related MSTE entry
+*
+MODX070  DS    0H
+         TM    XSAFLG1,XSA@CHNG        state changed?
+         BZ    MODX999                 no
+         TM    XSAFLG2,XSA@ALLX        all exits request?
+         BZ    MODX099                 no
+         ICM   R7,15,ZEVTMSTE          MSTE init?
+         BZ    MODX099                 should never happen
+*
+MODX075  DS    0H
+         CLC   MSTEID,=CL4'MSTE'       MSTE?
+         BNE   MODX099                 no
+         TM    XSAFLG2,XSA@ACTX        change MSTE entry
+         BZ    MODX080                 no
+         OI    MSTESTAT,MSTR@ACT       yes
+         ZTRCE DYN=#,LINKAGE=LOCAL     trace
+         B     MODX090                 next MSTE
+*
+MODX080  DS    0H
+         NI    MSTESTAT,XFF-MSTR@ACT   change MSTE entry
+*
+MODX090  DS    0H
+         LA    R7,MSTE@SZE(,R7)        next MSTE entry
+         CLC   MSTETEND,=AL4(-1)       last entry?
+         BNE   MODX075                 loop
+*
+MODX099  DS    0H
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+         ZTRCE DYN=@,LINKAGE=LOCAL     trace
+         B     MODXXIT                 exit
+*
+**       Dynamic exit not defined msg
+*
+MODX999  DS    0H
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN76)      RSN
+         ZWTO  MID=ZEMF41E,PLIST=XSAPLST,                              +
+               V1=XSAXNAME             show exit name
+         OI    XSAFLG1,XSA@NFND        set ZEMF41E issued
+         B     MODXXIT                 exit
+*
+**       Dynamic exit state change failed msg
+*
+MODXERR  DS    0H
+         ZWTO  MID=ZEMF40E,PLIST=XSAPLST,                              +
+               V1=MSTEXITN,            exit name                       +
+               V2=XSARC,               RC                              +
+               V3=XSARSN               RSN
+*
+MODXXIT  DS    0H
+         ZMACS GEN=SRVEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         GETTABS                                            */
+*/*                                                                  */
+*/* Function:     Storage obtain exit tables service routine         */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  XSA address                                    */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R0  Reason code                                    */
+*/*               R1  Output parameter                               */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+GETTABS  ZMACS GEN=SRVENTY             entry
+         USING ZEVT,R11
+         ZTRCE CSM=H,LINKAGE=LOCAL     trace
+*
+**       Storage obtain ZIO block
+*
+         L     R3,=AL4(ZIO@SIZE)
+         STORAGE OBTAIN,LOC=24,COND=NO,                                +
+               LENGTH=(R3),SP=&SP230,LINKAGE=SYSTEM
+         ST    R1,XSAZIOA
+         USING ZIO,R1
+         XC    ZIO(ZIO@SIZE),ZIO       scrub
+         MVC   ZIOID,=CL4'ZIO'         ID
+         MVC   ZIOOLFM,TGETOLFM        open listform
+         MVC   ZIOCLFM,TGETCLFM        close listform
+         MVC   ZIODCB(TGETDCBL),TGETDCB PARMLIN DCB
+         DROP  R1
+*
+**       Storage obtain MSTR table
+*
+         L     R3,=AL4(MSTR@MAX)
+         STORAGE OBTAIN,LOC=ANY,COND=NO,                               +
+               LENGTH=(R3),SP=&SP230,LINKAGE=SYSTEM
+         ST    R1,XSAMSTRA
+         LR    R2,R1
+         L     R15,ZEVTX40S            x'40'
+         MVCL  R2,R14                  scrub
+*
+**       Storage obtain MSTE table
+*
+         L     R3,=AL4(MSTE@MAX)
+         ST    R3,ZEVTMSEL             table size
+         STORAGE OBTAIN,LOC=ANY,COND=NO,                               +
+               LENGTH=(R3),SP=&SP245,LINKAGE=SYSTEM
+         ST    R1,ZEVTMSTE
+         LR    R2,R1
+         L     R15,ZEVTX40S            x'40'
+         MVCL  R2,R14                  scrub
+         AL    R1,ZEVTMSEL             table size
+         SL    R1,=AL4(MSTE@SZE)       MSTE size
+         USING MSTE,R1
+         MVC   MSTEID,=CL4'MSTE'       ID
+         MVC   ZEVTMSTZ,=AL4(MSTE@SZE) entry size
+         MVC   MSTEVERS,ZEVTVERS       product version
+         MVI   MSTESTAT,XZERO          zero state field
+         MVC   MSTETEND,=AL4(-1)       mark table end
+         L     R1,ZEVTMSTE             table address
+*
+GETT010  DS    0H
+         CLC   MSTETEND,=AL4(-1)       table end?
+         BE    GETT020                 yes
+         MVC   MSTEID,=CL4'MSTE'       ID
+         MVC   ZEVTMSTZ,=AL4(MSTE@SZE) entry size
+         MVC   MSTEVERS,ZEVTVERS       product version
+         MVI   MSTESTAT,XZERO          zero state field
+         MVC   MSTETEND,=CL4'FREE'     free indicator
+         LA    R1,MSTE@SZE(,R1)        next table entry
+         B     GETT010                 ID all entries
+         DROP  R1
+*
+**       Storage obtain ZREC table
+*
+GETT020  DS    0H
+         L     R3,=AL4(ZREC@MAX)       ZREC table size
+         AL    R3,=AL4(ZREC@PFL)       prefix size
+         STORAGE OBTAIN,LOC=ANY,COND=NO,                               +
+               LENGTH=(R3),SP=&SP230,LINKAGE=SYSTEM
+         LR    R2,R1
+         L     R15,ZEVTX40S            x'40'
+         MVCL  R2,R14                  scrub
+         USING ZRECPFX,R1
+         XC    ZRECPFX(ZREC@PFL),ZRECPFX
+         MVC   ZRECPFXI,=CL4'ZREC'     prefix ID
+         LA    R2,ZREC@PFL(,R1)        skip prefix
+         ST    R2,XSAZRECA             ZREC table address
+         ST    R2,ZRECFRST             first table entry
+         ST    R2,ZRECCURR             current table entry
+         AL    R2,=AL4(ZREC@MAX-ZREC@SZE)
+         ST    R2,ZRECLAST             last table entry
+         DROP  R1
+*
+**       Storage obtain ZPAR table
+*
+         L     R3,=AL4(ZPAR@SZE)
+         STORAGE OBTAIN,LOC=ANY,COND=NO,                               +
+               LENGTH=(R3),SP=&SP230,LINKAGE=SYSTEM
+         ST    R1,XSAZPARA
+         USING ZPAR,R1
+         LR    R2,R1
+         L     R15,ZEVTX40S            x'40'
+         MVCL  R2,R14                  scrub
+         MVC   ZPARID,=CL4'ZPAR'       ID
+         DROP  R1
+*
+**       Build ZXQE common cell pool
+*
+         MVC   XSAPLST(ZCPOOLZ),ZCPOOL
+         MVC   XSACPHDR,ZXQECPLC       cell pool hdr
+         MVC   XSACPSUB,ZEVTSUBN       server name
+         CPOOL BUILD,                                                  +
+               SP=&SP241,              common subpool                  +
+               KEY=0,                  storage key                     +
+               LOC=31,                 storage location                +
+               PCELLCT=&ZXQEPRI,       primary cells                   +
+               SCELLCT=&ZXQESEC,       secondary cells                 +
+               CSIZE=XQE@SIZE,         cell size                       +
+               CPID=ZEVTZXQE,          cell pool ID                    +
+               OWNER=PRIMARY,          cell pool owner                 +
+               HDR=XSACPHDR,           cell pool header                +
+               LINKAGE=SYSTEM,         use PC call                     +
+               MF=(E,XSAPLST)
+*
+**       Build ZXQE staging queue cell pool
+*
+         MVC   XSAPLST(ZCPOOLZ),ZCPOOL
+         MVC   XSACPHDR,ZXQECPLS       cell pool hdr
+         MVC   XSACPSUB,ZEVTSUBN       server name
+         CPOOL BUILD,                                                  +
+               SP=&SP230,              private subpool                 +
+               KEY=0,                  storage key                     +
+               LOC=31,                 storage location                +
+               PCELLCT=&ZXQEPRI,       primary cells                   +
+               SCELLCT=&ZXQESEC,       secondary cells                 +
+               CSIZE=XQE@SIZE,         cell size                       +
+               CPID=XSACPID,           cell pool ID                    +
+               OWNER=PRIMARY,          cell pool owner                 +
+               HDR=XSACPHDR,           cell pool header                +
+               LINKAGE=SYSTEM,         use PC call                     +
+               MF=(E,XSAPLST)
+*
+**       Build ZEXT common cell pool
+*
+         MVC   XSAPLST(ZCPOOLZ),ZCPOOL
+         MVC   XSACPHDR,ZEXTCPLC       cell pool hdr
+         MVC   XSACPSUB,ZEVTSUBN       server name
+         CPOOL BUILD,                                                  +
+               SP=&SP241,              common subpool                  +
+               KEY=0,                  storage key                     +
+               LOC=31,                 storage location                +
+               PCELLCT=&ZEXTPRI,       primary cells                   +
+               SCELLCT=&ZEXTSEC,       secondary cells                 +
+               CSIZE=EXT@SIZE,         cell size                       +
+               CPID=ZEVTZEXT,          cell pool ID                    +
+               OWNER=PRIMARY,          cell pool owner                 +
+               HDR=XSACPHDR,           cell pool header                +
+               LINKAGE=SYSTEM,         use PC call                     +
+               MF=(E,XSAPLST)
+*
+**       Build ZEXT staging cell pool
+*
+         MVC   XSAPLST(ZCPOOLZ),ZCPOOL
+         MVC   XSACPHDR,ZEXTCPLS       cell pool hdr
+         MVC   XSACPSUB,ZEVTSUBN       server name
+         CPOOL BUILD,                                                  +
+               SP=&SP230,              private subpool                 +
+               KEY=0,                  storage key                     +
+               LOC=31,                 storage location                +
+               PCELLCT=&ZEXTPRI,       primary cells                   +
+               SCELLCT=&ZEXTSEC,       secondary cells                 +
+               CSIZE=EXT@SIZE,         cell size                       +
+               CPID=XSACPXT,           cell pool ID                    +
+               OWNER=PRIMARY,          cell pool owner                 +
+               HDR=XSACPHDR,           cell pool header                +
+               LINKAGE=SYSTEM,         use PC call                     +
+               MF=(E,XSAPLST)
+*
+TGETXIT  DS    0H
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+         ZMACS GEN=SRVEXIT             exit
+*---------------------------------------------------------------------*
+*        CPOOL build listform                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ZCPOOL   CPOOL BUILD,SP=,PCELLCT=,SCELLCT=,CSIZE=,OWNER=,HDR=,MF=L
+ZCPOOLZ  EQU   *-ZCPOOL
+         DS    0C
+ZXQECPLC DC    CL24'&SUB-&REL-ZXQE-CPOOL'
+ZXQECPLS DC    CL24'&SUB-&REL-ZXQE-STAGE'
+ZEXTCPLC DC    CL24'&SUB-&REL-ZEXT-CPOOL'
+ZEXTCPLS DC    CL24'&SUB-&REL-ZEXT-STAGE'
+*---------------------------------------------------------------------*
+*        Data Control Block                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+TGETOLFM OPEN  (,),MODE=31,MF=L        OPEN listform
+TGETCLFM CLOSE (,),MODE=31,MF=L        CLOSE listform
+         DS    0F
+TGETDCB  DCB   DDNAME=ZEMFPARM,        DDname                          +
+               EODAD=0,                EOD supplied by caller          +
+               DSORG=PS,               sequential                      +
+               LRECL=80,               record length                   +
+               MACRF=GM,               macro format                    +
+               BUFNO=1                 just one buffer
+TGETDCBL EQU   *-TGETDCB
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         FRETABS                                            */
+*/*                                                                  */
+*/* Function:     Storage release exit tables service routine        */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  XSA address                                    */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R0  Reason code                                    */
+*/*               R1  Output parameter                               */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+FRETABS  ZMACS GEN=SRVENTY             entry
+         USING ZEVT,R11
+         ZTRCE CSM=I,LINKAGE=LOCAL     trace
+*
+**       Storage release ZIO block
+*
+         ICM   R3,15,XSAZIOA           ZIO?
+         BZ    TFRE010                 no
+         L     R2,=AL4(ZIO@SIZE)
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R3),LENGTH=(R2),SP=&SP230,LINKAGE=SYSTEM
+*
+**       Storage release MSTR table
+*
+TFRE010  DS    0H
+         ICM   R3,15,XSAMSTRA          MSTR?
+         BZ    TFRE020                 no
+         L     R2,=AL4(MSTR@MAX)
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R3),LENGTH=(R2),SP=&SP230,LINKAGE=SYSTEM
+*
+**       Storage release ZREC table
+*
+TFRE020  DS    0H
+         ICM   R3,15,XSAZRECA          ZREC?
+         BZ    TFRE030                 no
+         SL    R3,=AL4(ZREC@PFL)       prefix address
+         L     R2,=AL4(ZREC@MAX)       ZREC table size
+         AL    R2,=AL4(ZREC@PFL)       prefix size
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R3),LENGTH=(R2),SP=&SP230,LINKAGE=SYSTEM
+*
+**       Storage release ZPAR table
+*
+TFRE030  DS    0H
+         ICM   R3,15,XSAZPARA          ZPAR?
+         BZ    TFRE040                 no
+         L     R2,=AL4(ZPAR@SZE)
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R3),LENGTH=(R2),SP=&SP230,LINKAGE=SYSTEM
+*
+**       Delete ZXQE staging queue cell pool
+*
+TFRE040  DS    0H
+         ICM   R3,15,XSACPID           cell pool init?
+         BZ    TFRE050                 no
+         XC    XSACPID,XSACPID         zero cell pool ID
+         CPOOL DELETE,CPID=(R3),LINKAGE=SYSTEM
+*
+**       Delete ZEXT staging queue cell pool
+*
+TFRE050  DS    0H
+         ICM   R3,15,XSACPXT           cell pool init?
+         BZ    TFRE099                 no
+         XC    XSACPXT,XSACPXT         zero cell pool ID
+         CPOOL DELETE,CPID=(R3),LINKAGE=SYSTEM
+*
+TFRE099  DS    0H
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+*
+TFREXIT  DS    0H
+         ZMACS GEN=SRVEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         XMEMPAR                                            */
+*/*                                                                  */
+*/* Function:     Parse PARMLIB exit member service routine          */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  XSA address                                    */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R8  ZRECPFX address                                */
+*/*               R9  ZPAR address                                   */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R0  Reason code                                    */
+*/*               R1  Output parameter                               */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+XMEMPAR  ZMACS GEN=SRVENTY
+         USING ZEVT,R11
+         MVC   XSARC,=AL4(RC8)         initial RC
+         ZTRCE CSM=J,LINKAGE=LOCAL     trace
+*
+**       Clear ZPAR parameter data
+*
+XPAR000  DS    0H
+         L     R9,XSAZPARA             ZPAR
+         USING ZPAR,R9
+         LA    R0,ZPARDATA             parmdata address
+         LA    R1,ZPAR@DTL             parmdata length
+         L     R15,ZEVTX40S            x'40'
+         MVCL  R0,R14                  scrub
+*
+**       Parse exit parameter record
+*
+         L     R8,XSAZRECA             ZREC table address
+         USING ZREC,R8
+         SL    R8,=AL4(ZREC@PFL)       ZREC prefix
+         USING ZRECPFX,R8
+         CLC   ZRECPFXI,=CL4'ZREC'     ZREC?
+         BE    XPAR010                 yes
+         MVC   XSARSN,=AL4(RSN328)     RSN
+         ZWTO  MID=ZEMF26E,PLIST=XSAPLST,                              +
+               V1==CL4'ZREC',V2=XSARC,V3=XSARSN
+         B     XPARXIT                 exit
+*
+XPAR010  DS    0H
+         L     R5,ZRECCURR             current record
+         USING ZREC,R5
+         L     R3,=A(KEYTAB)           subsystem IDs table
+         USING XKEY,R3
+         MVC   XSARID,0(R5)            RID
+*
+XPAR020  DS    0H
+         LH    R1,XKEYLEN              keyword length
+         BCTR  R1,0
+         EX    R1,KEYCOMP              keyword match?
+         BE    XPAR030                 yes
+         LA    R3,XKEY@SZE(,R3)        next entry
+         CLC   =AL4(-1),0(R3)          last entry?
+         BNE   XPAR020                 no, loop
+         MVC   XSARSN,=AL4(RSN332)     RSN
+         B     XPARERR                 error
+*
+**       Locate END parameter record
+*
+XPAR030  DS    0H
+         L     R4,ZRECENTY             # of records
+         L     R5,ZRECCURR             current record
+         MVC   XSARID,0(R5)            RID
+         MVC   XSASUBID,ZEVTBLKS       scrub subsysID
+         XR    R1,R1
+         IC    R1,XKEYSUBL             address space type size
+         STH   R1,XSAJTYPL             init address space type size
+         BCTR  R1,0
+         EX    R1,COPYSUB              copy subsystem ID
+         MVC   XSAJTYPE,XKEYTYPE       {JOB|STC|TSO|OMVS|ASCH}
+         MVC   XSASUBNM,XKEYSUBN       {JES2/3|STC|TSO|OMVS|ASCH}
+         CLC   XSAEXIT,=CL8'IEFU29'    SMF dump exit?
+         BE    XPAR035                 yes
+         CLC   XSAEXIT,=CL8'IEFU29L'   SMF log stream dump exit?
+         BNE   XPAR040                 no
+*
+XPAR035  DS    0H
+         CLC   XSASUBNM,=CL4'STC'      STC subsystem ID?
+         BE    XPAR040                 yes
+         MVC   XSARSN,=AL4(RSN408)     RSN
+         B     XPARERR                 error
+*
+XPAR040  DS    0H
+         CLC   ZEVTENDR,ZRECORD        END record?
+         BE    XPAR050                 yes
+         LA    R5,ZREC@SZE(,R5)        next record
+         BCT   R4,XPAR040              find end record
+         MVC   XSARSN,=AL4(RSN324)     RSN
+         B     XPARERR                 error
+*
+XPAR050  DS    0H
+         L     R3,ZRECCURR             current record
+         SLR   R5,R3                   total record length
+         CL    R5,=AL4(ZPAR@DTL)       overflows ZPAR?
+         BL    XPAR060                 no
+         MVC   XSARSN,=AL4(RSN336)     RSN
+         ZWTO  MID=ZEMF32E,PLIST=XSAPLST,                              +
+               V1==CL4'ZPAR',V2=XSARC,V3=XSARSN
+         B     XPARXIT                 exit
+*
+**       Create ZPAR exit parameter data
+*
+XPAR060  DS    0H
+         L     R9,XSAZPARA             ZPAR address
+         L     R5,ZRECCURR             current record
+         LA    R2,ZPARDATA             ZPAR
+         MVC   XSARID,0(R5)            RID
+*
+XPAR070  DS    0H
+         CLC   ZEVTENDR,ZRECORD        END record?
+         BE    XPAR100                 yes
+         LA    R4,ZRECORD              record address
+         LA    R3,ZREC@DTZ             record length
+*
+XPAR080  DS    0H
+         CLC   =CL2',',0(R4)           end of parm?
+         BE    XPAR090                 yes
+         CLC   =CL2')',0(R4)           end of parm?
+         BE    XPAR090                 yes
+         LA    R4,1(,R4)               walk thru parm
+         BCT   R3,XPAR080
+         MVC   XSARID,ZRECORD          RID
+         MVC   XSARSN,=AL4(RSN344)     RSN
+         B     XPARERR                 error
+*
+XPAR090  DS    0H
+         LA    R4,1(,R4)               add separator
+         LA    R3,ZRECORD              record address
+         SLR   R4,R3                   parm string length
+         BCTR  R4,0
+         EX    R4,COPYPAR              copy parm string
+         LA    R2,1(R4,R2)             next parm string address
+         LA    R5,ZREC@SZE(,R5)        next record
+         B     XPAR070                 loop
+*
+**       Update current ZPAR entry
+*
+XPAR100  DS    0H
+         MVC   XSARID,0(R5)            RID
+         LA    R5,ZREC@SZE(,R5)        next record
+         ST    R5,ZRECCURR             set next record address
+         L     R3,XSAZPARA             ZPAR address
+         LA    R2,ZPAR@DTL-2           ZPAR table size
+*
+XPAR110  DS    0H
+         CLC   =CL2')',0(R3)           close paren found
+         BE    XPAR120                 yes
+         LA    R3,1(,R3)               walk thru ZPAR data
+         BCT   R2,XPAR110              loop
+         MVC   XSARSN,=AL4(RSN340)     RSN
+         B     XPARERR                 error
+*
+XPAR120  DS    0H
+         LA    R3,2(,R3)               add one
+         LA    R4,ZPARDATA             ZPAR data address
+         SLR   R3,R4                   compute ZPAR length
+         ST    R3,ZPARLEN              set ZPAR length
+*
+**       Call exit parser routine
+*
+XPAR200  DS    0H
+         ZCALL SRV=ZEVTPARA,(R12)      EMFPAR
+         CLC   XSARC,=AL4(RC0)         successful?
+         BNE   XPARXIT                 no
+*
+**       Process next exit record section
+*
+         L     R5,ZRECCURR             next record address
+         CLC   ZRECORD(L'ZEVTFINR),ZEVTFINR more records?
+         BNE   XPAR000                 yes, loop
+         B     XPAR999                 no, exit
+*
+XPARERR  DS    0H
+         ZWTO  MID=ZEMF33E,PLIST=XSAPLST,                              +
+               V1==CL4'ZREC',V2=XSAEXIT,V3=XSARID,V4=XSARSN
+         B     XPARXIT                 exit
+*
+XPAR999  DS    0H
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+*
+XPARXIT  DS    0H
+         ZMACS GEN=SRVEXIT             exit
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYPAR  MVC   0(*-*,R2),ZRECORD
+KEYCOMP  CLC   XKEYNAME(*-*),ZRECORD
+COPYSUB  MVC   XSASUBID(*-*),XKEYNAME
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         XMEMQUE                                            */
+*/*                                                                  */
+*/* Function:     Queue common ZXQE element service routine          */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  XSA address                                    */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R6  ZDYNTBLE address                               */
+*/*               R7  Staged ZXQE address                            */
+*/*               R8  Common ZXQE address                            */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R0  Reason code                                    */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+XMEMQUE  ZMACS GEN=SRVENTY
+         USING ZEVT,R11
+         ZTRCE CSM=K,LINKAGE=LOCAL     trace
+*
+**       Scan dynamic exit table
+*
+         LA    R5,ZDYNTABE             number of entries
+         L     R6,=A(ZDYNTBLE)         exit name table address
+         USING DYNX,R6
+*
+XQUE000  DS    0H
+         CLC   XSAEXIT,=CL8'&ALLXIT'   do all exit queues?
+         BE    XQUE010                 yes
+         CLC   DYNEXTNM,XSAEXIT        exit name match?
+         BNE   XQUE099                 no, loop
+*
+**       Check staged ZXQE status
+*
+XQUE010  DS    0H
+         L     R7,DYNSTGEQ             staged queue offset
+         L     R7,0(R7,R12)            staged queue address
+         LTR   R7,R7                   staged ZXQEs?
+         BZ    XQUE099                 no, loop
+STAGED   USING ZXQE,R7
+         XC    XSASTGED,XSASTGED       zero staged queue ptr
+*
+**       Get common ZXQE element
+*
+XQUE020  DS    0H
+         CPOOL GET,UNCOND,             get unconditional               +
+               CPID=ZEVTZXQE,          cell pool ID                    +
+               REGS=SAVE,              protect my regs                 +
+               LINKAGE=SYSTEM
+         LR    R8,R1                   common ZXQE
+         USING ZXQE,R8
+*
+**       Copy staged ZXQE to common ZXQE
+*
+         MVC   ZXQE(XQE@SIZE),STAGED.ZXQE
+         MVC   XQECHPTR,XSASTGED       chain ZXQE
+         ST    R8,XSASTGED             push ZXQE on queue
+*
+**       Free staged ZXQE element
+*
+         L     R2,STAGED.XQEZEXTP      ZEXT ptr
+         LR    R3,R7
+         L     R7,STAGED.XQECHPTR      chain ptr
+         CPOOL FREE,                   free cell                       +
+               CELL=(R3),              cell                            +
+               CPID=XSACPID,           cell pool ID                    +
+               REGS=SAVE               protect my regs
+*
+**       Get common ZEXT element
+*
+         TM    XQECOMF1,XQE@EXTZ       ZEXT required?
+         BNZ   XQUE030                 no
+         LTR   R2,R2                   staged ZEXT?
+         BZ    XQUE030                 no
+         CPOOL GET,UNCOND,             get unconditional               +
+               CPID=ZEVTZEXT,          cell pool ID                    +
+               REGS=SAVE,              protect my regs                 +
+               LINKAGE=SYSTEM
+         LR    R4,R1                   common ZEXT
+         USING ZEXT,R4
+*
+**       Copy staged ZEXT to common ZEXT
+*
+         MVC   ZEXT(EXT@SIZE),0(R2)    copy ZEXT
+         ST    R4,XQEZEXTP             chain ZEXT to ZXQE
+*
+**       Free staged ZEXT element
+*
+         CPOOL FREE,                   free cell                       +
+               CELL=(R2),              cell                            +
+               CPID=XSACPXT,           cell pool ID                    +
+               REGS=SAVE               protect my regs
+*
+XQUE030  DS    0H
+         LTR   R7,R7                   more staged ZXQEs?
+         BNZ   XQUE020                 yes, loop
+*
+**       Copy ZXQEs chain to common queue
+*
+XQUE040  DS    0H
+         L     R2,DYNCOMMQ             common queue offset
+         LA    R2,0(R2,R11)            common queue address
+         L     R1,0(,R2)               common queue ptr
+         L     R3,XSASTGED             staged queue address
+         CS    R1,R3,0(R2)             activate queue
+         BNE   XQUE040                 changed: try again
+*
+XQUE099  DS    0H
+         LA    R6,DYN@SIZE(,R6)        next entry
+         BCT   R5,XQUE000              loop
+*
+XQUEXIT  DS    0H
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+         ZMACS GEN=SRVEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         ALLOC                                              */
+*/*                                                                  */
+*/* Function:     Dynamic allocation service routine                 */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  DAB  address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 savearea address                               */
+*/*               R14 return address                                 */
+*/*               R15 entry point address                            */
+*/*                                                                  */
+*/* Regs Usage:   R7  DAB  address                                   */
+*/*               R10 base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 savearea address                               */
+*/*                                                                  */
+*/* Output Regs:  R0  reason code                                    */
+*/*               R15 return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+ALLOC    DS    0H
+         ENTRY ALLOC                   entry
+         STM   R14,R12,GPR@R14(R13)    save caller regs
+         BASR  R10,0                   entry
+         USING *,R10                   base
+         B     ALLO000                 branch
+         DC    CL8'ALLOC'              ID
+*
+ALLO000  DS    0H
+         USING ZEVT,R11                ZEVT
+         LR    R7,R1                   DAB
+         USING DAB,R7
+         CLC   DABID,=CL4'DAB'         DAB?
+         BE    ALLO010                 yes
+         L     R15,=AL4(RC8)           RC
+         L     R0,=AL4(RSN304)         RSN
+         LM    R1,R12,GPR@R1(R13)      restore regs
+         BR    R14                     return
+*
+ALLO010  DS    0H                      ID
+         LA    R1,DABSAVE              savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         OI    DABFLG2,DAB@ALRQ        ID request
+         ZTRCE CSM=S,LINKAGE=LOCAL     trace
+*
+**       Initialize S99RB block
+*
+         XC    DABRBP(DABTUBLK),DABRBP
+         LA    R4,DABRB                S99RB
+         USING S99RB,R4
+         LA    R6,DABRBP               S99RBP
+         USING S99RBP,R6
+         ST    R4,S99RBPTR             set S99RB ptr
+         OI    S99RBPTR,S99RBPND       set high bit on
+         XC    S99RB(RBLEN),S99RB      scrub S99RB block
+         MVI   S99RBLN,RBLEN           RB length
+         MVI   S99VERB,S99VRBAL        verb code
+         MVC   DABALLOC(DABALLSZ),DYNALLOC
+*
+         LA    R5,DABTUPL              S99TUPL
+         USING S99TUPL,R5
+         ST    R5,S99TXTPP             set S99TUPL ptr
+         LA    R1,DABDSNTU             DSName TU
+         ST    R1,S99TUPTR             DSName TU ptr
+         MVC   DABDSN,DABDSNAM         init DSName
+         TM    DABFLG1,DAB@DSNM        DSName supplied?
+         BNZ   ALLO020                 yes
+         MVC   DABDSN,ZEVTPLIB         use default DSName
+*
+ALLO020  DS    0H
+         TM    DABFLG1,DAB@AMEM        Member supplied?
+         BZ    ALLO030                 no
+         LA    R5,4(,R5)               next S99TUPL
+         LA    R1,DABMEMTU             Member TU
+         ST    R1,S99TUPTR             Member TU ptr
+         MVC   DABMEM,DABMEMBR         init supplied member name
+*
+ALLO030  DS    0H
+         LA    R5,4(,R5)               next S99TUPL
+         LA    R1,DABDDNTU             DDname TU
+         ST    R1,S99TUPTR             DDname TU PTR
+         MVC   DABDDN,DABDDNAM         init DDname
+         TM    DABFLG1,DAB@DDNM        DDname supplied?
+         BNZ   ALLO040                 yes
+         MVC   DABDDN,ZEVTPDDN         use default DDname
+*
+ALLO040  DS    0H
+         TM    DABFLG1,DAB@SOUT        SYSOUT supplied?
+         BZ    ALLO050                 no
+         LA    R5,4(,R5)               next S99TUPL
+         LA    R1,DABOTU               SYSOUT TU
+         ST    R1,S99TUPTR             SYSOUT TU ptr
+         MVC   DABOUT,DABCLASS         init supplied SYSOUT=class
+*
+ALLO050  DS    0H
+         TM    DABFLG1,DAB@SWTR        WTR name supplied?
+         BZ    ALLO060                 no
+         LA    R5,4(,R5)               next S99TUPL
+         LA    R1,DABWTU               WTRname TU
+         ST    R1,S99TUPTR             WTRname TU ptr
+         MVC   DABWTR,DABWTRNM         init supplied WTR name
+*
+ALLO060  DS    0H
+         LA    R5,4(,R5)               next S99TUPL
+         LA    R1,DABSTSTU             Status TU
+         ST    R1,S99TUPTR             Status TU ptr
+         MVI   DABDISP,OLD             assume DISP=OLD
+         TM    DABFLG1,DAB@AOLD        DISP=OLD request?
+         BNZ   ALLO070                 yes
+         MVI   DABDISP,MOD             assume DISP=MOD
+         TM    DABFLG1,DAB@AMOD        DISP=MOD request?
+         BNZ   ALLO070                 yes
+         MVI   DABDISP,SHR             set DISP=SHR default
+*
+ALLO070  DS    0H
+         TM    DABFLG1,DAB@KEEP        keep allocated?
+         BNZ   ALLO080                 yes
+         LA    R5,4(,R5)               next S99TUPL
+         LA    R1,DABCLSTU             Close TU
+         ST    R1,S99TUPTR             Close TU ptr
+*
+**       Allocate requested dataset
+*
+ALLO080  DS    0H
+         OI    S99TUPTR,S99TUPLN       last S99TUPL
+         LR    R1,R6                   DYNALLOC parm ptr
+         DYNALLOC ,
+         ST    R15,DABRC               RC
+         ST    R15,DABXRC              XRC
+         LTR   R15,R15                 allocate successful?
+         BZ    ALLOXIT                 yes
+*
+**       Issue allocation failed msg
+*
+         LH    R1,S99INFO              info code
+         ST    R1,DABINFO              init info code
+         LH    R1,S99ERROR             error code
+         ST    R1,DABERROR             init error code
+         ZWTO  MID=ZEMF28E,PLIST=DABPLST,                              +
+               V1==CL8'ALLOC',         show service                    +
+               V2=DABXRC,              show RC                         +
+               V3=DABINFO,             show info code                  +
+               V4=DABERROR,            show error code                 +
+               V5=DABDSN               show DSName
+*
+ALLOXIT  DS    0H
+         L     R15,DABRC               RC
+         L     R0,DABRSN               RSN
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R1,R12,GPR@R1(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        DSName allocation text units                                 *
+*--------+---------+---------+---------+---------+---------+---------+*
+DYNALLOC DS    0F
+DSNTU    DC    AL2(DALDSNAM)
+         DC    X'0001'
+         DC    X'002C'
+         DC    CL44' '                 DSName
+*
+MEMTU    DC    AL2(DALMEMBR)
+         DC    X'0001'
+         DC    X'0008'
+         DC    CL8' '                  Member Name
+*
+DDNTU    DC    AL2(DALDDNAM)
+         DC    X'0001'
+         DC    X'0008'
+         DC    CL8' '                  DDname
+*
+SYSOUT   DC    AL2(DALSYSOU)
+         DC    X'0001'
+         DC    X'0001'
+         DC    CL1' '                  SYSOUT=class
+*
+SYSPGM   DC    AL2(DALSPGNM)
+         DC    X'0001'
+         DC    X'0008'
+         DC    CL8' '                  SYSOUT writer name
+*
+STATTU   DC    AL2(DALSTATS)
+         DC    X'0001'
+         DC    X'0001'
+         DC    X'08'                   DISP=SHR
+*
+CLOSETU  DC    AL2(DALCLOSE)
+         DC    X'0000'                 Deallocate at CLOSE
+DYNALLSZ EQU   *-DYNALLOC
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         DEALLOC                                            */
+*/*                                                                  */
+*/* Function:     Dynamic deallocation service routine               */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  DAB  address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 savearea address                               */
+*/*               R14 return address                                 */
+*/*               R15 entry point address                            */
+*/*                                                                  */
+*/* Regs Usage:   R7  DAB  address                                   */
+*/*               R10 base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 savearea address                               */
+*/*                                                                  */
+*/* Output Regs:  R0  reason code                                    */
+*/*               R15 return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+DEALLOC  DS    0H
+         ENTRY DEALLOC                 entry
+         STM   R14,R12,GPR@R14(R13)    save caller regs
+         BASR  R10,0                   entry
+         USING *,R10                   base
+         B     DEAL000                 branch
+         DC    CL8'DEALLOC'            ID
+*
+DEAL000  DS    0H
+         USING ZEVT,R11                ZEVT
+         LR    R7,R1                   DAB
+         USING DAB,R7
+         CLC   DABID,=CL4'DAB'         DAB?
+         BE    DEAL010                 yes
+         L     R15,=AL4(RC8)           RC
+         L     R0,=AL4(RSN304)         RSN
+         LM    R1,R12,GPR@R1(R13)      restore regs
+         BR    R14                     return
+*
+DEAL010  DS    0H                      ID
+         LA    R1,DABSAVE              savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         OI    DABFLG2,DAB@DLRQ        ID request
+         ZTRCE CSM=T,LINKAGE=LOCAL     trace
+*
+**       Initialize S99RB block
+*
+         XC    DABRBP(DABTUBLK),DABRBP
+         LA    R4,DABRB                S99RB
+         USING S99RB,R4
+         LA    R6,DABRBP               S99RBP
+         USING S99RBP,R6
+         ST    R4,S99RBPTR             S99RB ptr
+         OI    S99RBPTR,S99RBPND       set high bit on
+         XC    S99RB(RBLEN),S99RB      scrub S99RB block
+         MVI   S99RBLN,RBLEN           RB length
+         MVI   S99VERB,S99VRBUN        verb code
+         MVC   DABMUNAL(DEALLOCZ),DEALDEAL
+         LA    R5,DABTUPL              S99TUPL
+         USING S99TUPL,R5
+         ST    R5,S99TXTPP             S99RB ptr
+         LA    R1,DABUDNTU             DDname TU
+         ST    R1,S99TUPTR             DDname TU ptr
+         MVC   DABUDDN,DABDDNAM        init DDName
+         TM    DABFLG1,DAB@DDNM        DDname supplied?
+         BNZ   DEAL020                 yes
+         MVC   DABUDDN,ZEVTPDDN        use default DDname
+*
+DEAL020  DS    0H
+         OI    S99TUPTR,S99TUPLN       last S99TUPL
+         LR    R1,R6                   set DYNALLOC parm ptr
+         DYNALLOC ,
+         ST    R15,DABRC               RC
+         ST    R15,DABXRC              XRC
+         LTR   R15,R15                 successfu?
+         BZ    DEALXIT                 yes
+         CLC   DABRC,=AL4(RC4)         possibly unallocated?
+         BNE   DEALERR                 no
+         XC    DABRC,DABRC             RC
+         CLC   S99ERROR,=XL2'0438'     DDname not found?
+         BE    DEALXIT                 yes
+         CLC   S99ERROR,=XL2'0440'     already deallocated?
+         BE    DEALXIT                 yes
+*
+**       Issue deallocation failed msg
+*
+DEALERR  DS    0H
+         LH    R1,S99INFO              info code
+         ST    R1,DABINFO              save info code
+         LH    R1,S99ERROR             error code
+         ST    R1,DABERROR             save error code
+         ZWTO  MID=ZEMF29E,PLIST=DABPLST,                              +
+               V1==CL8'DEALLOC',       show service                    +
+               V2=DABXRC,              show RC                         +
+               V3=DABINFO,             show info code                  +
+               V4=DABERROR,            show error code                 +
+               V5=DABUDDN              show DSName
+*
+DEALXIT  DS    0H
+         L     R15,DABRC               RC
+         L     R0,DABRSN               RSN
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R1,R12,GPR@R1(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        DDname unallocation text units                               *
+*--------+---------+---------+---------+---------+---------+---------+*
+DEALDEAL DS    0F
+         DC    AL2(DUNDDNAM)
+         DC    X'0001'
+         DC    X'0008'
+         DC    CL8' '                  DDName
+DEALLOCZ EQU   *-DEALDEAL
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         ALLOCRT                                            */
+*/*                                                                  */
+*/* Function:     Dynamic allocation retrieval service routine       */
+*/*                                                                  */
+*/* Restrictions: None                                               */
+*/*                                                                  */
+*/* Input Regs:   R1  DAB address                                    */
+*/*               R11 ZEVT address                                   */
+*/*               R13 savearea address                               */
+*/*               R14 return address                                 */
+*/*               R15 entry point address                            */
+*/*                                                                  */
+*/* Regs Usage:   R7  DAB  address                                   */
+*/*               R10 base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 savearea address                               */
+*/*                                                                  */
+*/* Output Regs:  R0  reason code                                    */
+*/*               R15 return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+ALLOCRT  DS    0H
+         ENTRY ALLOCRT                 entry
+         STM   R14,R12,GPR@R14(R13)    save caller regs
+         BASR  R10,0                   entry
+         USING *,R10                   base
+         B     ARET000                 branch
+         DC    CL8'ALLOCRT'            ID
+*
+ARET000  DS    0H
+         USING ZEVT,R11                ZEVT
+         LR    R7,R1                   DAB
+         USING DAB,R7
+         CLC   DABID,=CL4'DAB'         DAB?
+         BE    ARET010                 yes
+         L     R15,=AL4(RC8)           RC
+         L     R0,=AL4(RSN304)         RSN
+         LM    R1,R12,GPR@R1(R13)      restore regs
+         BR    R14                     return
+*
+ARET010  DS    0H                      ID
+         LA    R1,DABSAVE              savearea
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1
+         OI    DABFLG2,DAB@INRQ        request ID
+         ZTRCE CSM=U,LINKAGE=LOCAL     trace
+*
+**       Initialize retrieval structure
+*
+         XC    DABRBP(DABTUBLK),DABRBP
+         LA    R4,DABRB                S99RB
+         USING S99RB,R4
+         LA    R6,DABRBP               S99RBP
+         USING S99RBP,R6
+         ST    R4,S99RBPTR             S99RBP ptr
+         OI    S99RBPTR,S99RBPND       set high bit on
+         XC    S99RB(RBLEN),S99RB      scrub S99RB block
+         MVI   S99RBLN,RBLEN           RB length
+         MVI   S99VERB,S99VRBIN        verb code
+         MVC   DABDINRT(DABDINLL),DINRTDYN
+*
+         LA    R5,DABTUPL              S99TUPL
+         USING S99TUPL,R5
+         ST    R5,S99TXTPP             S99TUPL ptr
+         LA    R1,DABDINTU             DDname TU
+         ST    R1,S99TUPTR             DDname TU ptr
+*
+         LA    R5,4(,R5)               next S99TUPL
+         LA    R1,DABDINTP             DSORG TU
+         ST    R1,S99TUPTR             DSORG TU ptr
+         MVC   DABDINDD,DABDDNAM       init DDname
+         TM    DABFLG1,DAB@DDNM        DDname supplied?
+         BNZ   ARET020                 yes
+         MVC   DABDINDD,ZEVTPDDN       use default DDname
+*
+**       Retrieve dataset information
+*
+ARET020  DS    0H
+         OI    S99TUPTR,S99TUPLN       last S99TUPL
+         LR    R1,R6                   DYNALLOC parm ptr
+         DYNALLOC ,
+         ST    R15,DABRC               RC
+         ST    R15,DABXRC              XRC
+         LTR   R15,R15                 successful?
+         BNZ   ARET099                 no
+         MVC   DABDSORG,DABDINDS       return DSORG to caller
+         B     ARETXIT                 exit
+*
+**       Issue retrieval failed msg
+*
+ARET099  DS    0H
+         LH    R1,S99INFO              info code
+         ST    R1,DABINFO              save info code
+         LH    R1,S99ERROR             error code
+         ST    R1,DABERROR             init error code
+         ZWTO  MID=ZEMF29E,PLIST=DABPLST,                              +
+               V1==CL8'ALLOCRT',       show service                    +
+               V2=DABXRC,              show RC                         +
+               V3=DABINFO,             show info code                  +
+               V4=DABERROR,            show error code                 +
+               V5=DABDINDD             show DDName
+*
+ARETXIT  DS    0H
+         L     R15,DABRC               RC
+         L     R0,DABRSN               RSN
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LM    R1,R12,GPR@R1(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Dataset information retrieval                                *
+*--------+---------+---------+---------+---------+---------+---------+*
+DINRTDYN DS    0F
+         DC    AL2(DINDDNAM)
+         DC    X'0001'
+         DC    X'0008'
+         DC    CL8' '                  DDName
+*
+DINTUORG DC    AL2(DINRTORG)
+         DC    X'0001'
+         DC    X'0002'
+         DC    XL2'0'                  DSORG
+DINRTSZE EQU   *-DINRTDYN
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         TRACE                                              */
+*/*                                                                  */
+*/* Function:     Subsystem server trace service routine             */
+*/*                                                                  */
+*/* Description:  Set requested trace data crumb value               */
+*/*                                                                  */
+*/* Restrictions: Routine runs without a savearea                    */
+*/*                                                                  */
+*/* Input Regs:   R0  Crumb value offset                             */
+*/*               R1  Crumb address offset                           */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R15 Return code                                    */
+*/*                                                                  */
+*/* Attributes:   TCB-mode                                           */
+*/*               SRB-mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+TRACE    ZMACS GEN=SRVENTY,SAVE=NO     entry
+*
+         LR    R5,R0                   crumb value offset
+         LR    R6,R1                   crumb address offset
+         LA    R15,8                   RC
+*
+**       Read/Write ZEVT addressability
+*
+         L     R11,=V(EMFSRV)          readonly ZEVT
+         USING ZEVT,R11
+         ICM   R11,15,ZEVTZEVT         Read/Write ZEVT?
+         BZ    TRACEXIT                no
+         CLC   ZEVTID,=CL4'ZEVT'       valid?
+         BNE   TRACEXIT                no
+*
+**       Update trace crumb data value
+*
+         XR    R2,R2
+         IPK   ,                       get key
+         LTR   R2,R2                   key zero caller?
+         BZ    TRACE10                 yes
+         SPKA  0(0)                    set supervisor key
+*
+TRACE10  DS    0H
+         LA    R5,0(R5,R11)            get address using offset
+         LA    R6,0(R6,R11)            get address using offset
+         MVC   0(1,R6),0(R5)           init crumb data value
+*
+         LTR   R2,R2                   key zero caller?
+         BZ    TRACEXIT                yes
+         SPKA  0(R2)                   restore caller key
+*
+TRACEXIT DS    0H
+         XR    R15,R15                 RC
+         ZMACS GEN=SRVEXIT,RESTORE=NO  exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         SETPASN                                            */
+*/*                                                                  */
+*/* Function:     Set non-cross-memory environment                   */
+*/*                                                                  */
+*/* Restrictions: Routine runs without a savearea                    */
+*/*                                                                  */
+*/* Input Regs:   R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R10 Base address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  GR1 SASN                                           */
+*/*               R15 RC                                             */
+*/*                                                                  */
+*/* Attributes:   TCB-mode                                           */
+*/*               SRB-mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/* Output Regs:  GR15 SASN                                          */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+SETPASN  ZMACS GEN=SRVENTY,SAVE=NO     entry
+         USING PSA,0                   FLC
+         IPK   ,                       get caller key
+         SPKA  0(0)                    supervisor key
+         XGR   R4,R4                   zero GR4
+         XGR   R5,R5                   zero GR5
+*
+**       Check ASN/LX reuse availability
+*
+         L     R3,FLCCVT               CVT
+         USING CVT,R3
+         TM    CVTFLAG2,CVTALR         ASN/LX reuse enabled?
+         BNZ   PASN000                 yes
+*
+**       Check PASN and SASN w/out instane
+*
+         SLGR  R15,R15
+         EPAR  R4                      PASN
+         ESAR  R5                      SASN
+         CLR   R4,R5                   PASN=SASN?
+         BE    PASNXIT                 yes, exit
+         B     PASN010                 carry on
+*
+**       Check PASN and SASN with instane
+*
+PASN000  DS    0H
+         SLGR  R15,R15
+         EPAIR R4                      PASN
+         ESAIR R5                      SASN
+         CLGR  R4,R5                   PASN=SASN?
+         BE    PASNXIT                 yes, exit
+*
+**       Set AX=1 authorization index
+*
+PASN010  DS    0H
+         SETLOCK TEST,TYPE=LOCAL,BRANCH=(HELD,PASN020)
+         LA    R0,1                    request AX=1
+         AXSET AX=(0)                  set AX=1
+         LR    R6,R0                   save previous AX
+*
+**       Set secondary ASN to primary ASN
+*
+PASN020  DS    0H
+         TM    CVTFLAG2,CVTALR         ASN/LX reuse enabled?
+         BNZ   PASN030                 yes
+         SSAR  R4                      set SASN=PASN
+         LGR   R15,R5                  return SASN to caller
+         B     PASN099                 restore AX
+*
+**       Set secondary ASN to primary ASN
+*
+PASN030  DS    0H
+         LOCASCB ASID=(R4)             get ASCB
+         LR    R7,R1
+         USING ASCB,R7
+         L     R7,ASCBASSB             ASSB
+         USING ASSB,R7
+         L     R7,ASSBISQN             sequence number
+         SLLG  R7,R7,32                shift to high reg
+         LR    R7,R4                   set PASN in low reg
+         SSAIR R7                      set SASN=PASN
+         LGR   R15,R5                  return SASN to caller
+*
+**       Restore original authorization index
+*
+PASN099  DS    0H
+         SETLOCK TEST,TYPE=LOCAL,BRANCH=(HELD,PASNXIT)
+         AXSET AX=(R6)                 restore original AX
+*
+PASNXIT  DS    0H
+         SPKA  0(R2)                   restore caller key
+         ZMACS GEN=SRVEXIT,RESTORE=NO  exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         SETSASN                                            */
+*/*                                                                  */
+*/* Function:     Restore cross-memory environment                   */
+*/*                                                                  */
+*/* Restrictions: Routine runs without a savearea                    */
+*/*                                                                  */
+*/* Input Regs:   GR1 Secondary ASID                                 */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R10 Base address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R15 Seconday SASN                                  */
+*/*                                                                  */
+*/* Attributes:   TCB-mode                                           */
+*/*               SRB-mode                                           */
+*/*               Primary mode                                       */
+*/*               Reentrant                                          */
+*/*               Caller key                                         */
+*/*               Caller state                                       */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+SETSASN  ZMACS GEN=SRVENTY,SAVE=NO     entry
+         USING PSA,0                   FLC
+         LGR   R5,R1                   SASN
+         LGR   R7,R1                   SASN
+         IPK   ,                       get caller key
+         SPKA  0(0)                    supervisor key
+*
+**       Check ASN/LX reuse availability
+*
+         XGR   R4,R4                   zero GR4
+         CLGR  R4,R5                   SASN valid?
+         BE    SASNXIT                 no, exit
+         L     R3,FLCCVT               CVT
+         USING CVT,R3
+         TM    CVTFLAG2,CVTALR         ASN/LX reuse enabled?
+         BNZ   SASN000                 yes
+*
+**       Check PASN and SASN without instance
+*
+         EPAR  R4                      PASN
+         CLR   R4,R5                   PASN=SASN?
+         BE    SASNXIT                 yes, exit
+         B     SASN010                 carry on
+*
+**       Check PASN and SASN with instane
+*
+SASN000  DS    0H
+         EPAIR R4                      PASN
+         CLGR  R4,R5                   PASN=SASN?
+         BE    SASNXIT                 yes, exit
+*
+**       Set AX=1 authorization index
+*
+SASN010  DS    0H
+         SETLOCK TEST,TYPE=LOCAL,BRANCH=(HELD,SASN020)
+         LA    R0,1                    request AX=1
+         AXSET AX=(0)                  set AX=1
+         LR    R6,R0                   save previous AX
+*
+**       Restore secondary ASN without instance
+*
+SASN020  DS    0H
+         TM    CVTFLAG2,CVTALR         ASN/LX reuse enabled?
+         BNZ   SASN030                 yes
+         SSAR  R5                      restore SASN
+         B     SASN099                 restore AX
+*
+**       Restore secondary ASN with instance
+*
+SASN030  DS    0H
+         SSAIR R5                      restore SASN
+*
+**       Restore original authorization index
+*
+SASN099  DS    0H
+         SETLOCK TEST,TYPE=LOCAL,BRANCH=(HELD,SASNXIT)
+         AXSET AX=(R6)                 restore original AX
+*
+SASNXIT  DS    0H
+         LGR   R15,R7                  SASN back to caller
+         SPKA  0(R2)                   restore caller key
+         ZMACS GEN=SRVEXIT,RESTORE=NO  exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         DYNXADD                                            */
+*/*                                                                  */
+*/* Description:  Add exit to Dynamic Exits Facility                 */
+*/*                                                                  */
+*/* Input Regs:   R7  MSTE address                                   */
+*/*               R8  MSTR address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R7  MSTE address                                   */
+*/*               R8  MSTR address                                   */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R1  Return code                                    */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+DYNXADD  ZMACS GEN=SUBENTY,DSA=XSA,SUBSAVE=XSANSTR
+         USING MSTE,R7
+         USING MSTR,R8
+         USING ZEVT,R11
+         ZTRCE CSM=X,LINKAGE=LOCAL     trace
+*
+**       Add dynamic exit routine
+*
+         L     R3,=V(EMFXIT)           EMFXIT
+         BSM   R3,0                    set AMODE
+         ST    R3,XSAEXITA             save address
+         LA    R3,XSAEXITA             address ptr
+         MVC   XSAFUNC,=CL8'add'       function
+         CSVDYNEX REQUEST=ADD,         add                             +
+               EXITNAME=MSTEXITN,      dynamic exit name               +
+               MODADDR=(R3),           exit address                    +
+               MODNAME=MSTEMODN,       ZEMF exit module name           +
+               STATE=&STATE,           exit state                      +
+               POS=&POS,               exit position                   +
+               JOBNAME=ANY,            default                         +
+               ADDABENDNUM=UNCHANGED,  default                         +
+               PARAM=MSTRNAME,         exit member name                +
+               RETCODE=XSARC,          RC                              +
+               RSNCODE=XSARSN,         RSN                             +
+               MF=(E,XSAPLST)
+         CLC   XSARC,=AL4(CSVDYNEXRC_OK) successful?
+         BNE   DYNXA10                 no
+*
+**       Dynamic exit add successful
+*
+         ZWTO  MID=ZEMF21I,PLIST=XSAPLST,                              +
+               V1=MSTEMODN,            exit name                       +
+               V2==CL12'added to',     function                        +
+               V3=MSTEXITN             dynamic exit name
+         XC    XSARC,XSARC             RC
+         B     DYNXAXIT                exit
+*
+**       Dynamic exit already added check
+*
+DYNXA10  DS    0H
+         CLC   XSARC,=AL4(CSVDYNEXRC_WARN) warning RC?
+         BNE   DYNXA20                 no, error
+         CLC   XSARSN,=AL4(CSVDYNEXRSNALREADYEXISTS) already added?
+         BNE   DYNXA20                 yes
+         ZWTO  MID=ZEMF39W,PLIST=XSAPLST,                              +
+               V1=MSTEXITN,            dynamic exit name               +
+               V2=XSARC,               RC                              +
+               V3=XSARSN               RSN
+         XC    XSARC,XSARC             RC
+         B     DYNXAXIT                exit
+*
+**       Dynamic exit add request failed
+*
+DYNXA20  DS    0H
+         ZWTO  MID=ZEMF39E,PLIST=XSAPLST,                              +
+               V1=MSTEXITN,            dynamic exit name               +
+               V2=MSTRNAME,            exit member name                +
+               V3=XSAFUNC,             function                        +
+               V4=XSARC,               RC                              +
+               V5=XSARSN               RSN
+*
+DYNXAXIT DS    0H
+         ZMACS GEN=SUBEXIT,DSA=XSA,OUTPAR=XSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         DYNXDEL                                            */
+*/*                                                                  */
+*/* Description:  Delete exit from Dynamic Exits Facility            */
+*/*                                                                  */
+*/* Input Regs:   R7  MSTE address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R7  MSTE address                                   */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R1  Return code                                    */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+DYNXDEL  ZMACS GEN=SUBENTY,DSA=XSA,SUBSAVE=XSANSTR
+         USING MSTE,R7
+         USING ZEVT,R11
+         ZTRCE CSM=Y,LINKAGE=LOCAL     trace
+*
+**       Delete dynamic exit routine
+*
+         MVC   XSAFUNC,=CL8'delete'
+         CSVDYNEX REQUEST=DELETE,                                      +
+               EXITNAME=MSTEXITN,      dynamic exit name               +
+               MODNAME=MSTEMODN,       ZEMF exit module name           +
+               FORCE=NO,               inactivate exit                 +
+               RETCODE=XSARC,          RC                              +
+               RSNCODE=XSARSN,         RSN                             +
+               MF=(E,XSAPLST)
+         CLC   XSARC,=AL4(CSVDYNEXRC_OK) successful?
+         BE    DYNXD99                 yes
+         CLC   XSARC,=AL4(CSVDYNEXRC_WARN) warning?
+         BNE   DYNXD10                 no
+         CLC   XSARSN,=AL4(CSVDYNEXRSNDOESNOTEXIST)
+         BNE   DYNXD10                 no
+         XC    XSARC,XSARC             yes
+         B     DYNXDXIT                exit
+*
+**       Dynamic exit delete failed
+*
+DYNXD10  DS    0H
+         CLC   XSARSN,=AL4(CSVDYNEXRSNEXITNAMENOTFOUND)
+         BNE   DYNXD20                 error
+         XC    XSARC,XSARC             RC
+         B     DYNXDXIT                exit
+*
+DYNXD20  DS    0H
+         ZWTO  MID=ZEMF39E,PLIST=XSAPLST,                              +
+               V1=MSTEXITN,            dynamic exit name               +
+               V2=MSTEMODN,            exit name                       +
+               V3=XSAFUNC,             function                        +
+               V4=XSARC,               RC                              +
+               V5=XSARSN               RSN
+         XC    XSARC,XSARC             RC
+         B     DYNXDXIT                exit
+*
+**       Dynamic exit delete successful
+*
+DYNXD99  DS    0H
+         XC    XSARC,XSARC             RC
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BZ    DYNXDXIT                no, skip msg
+         ZWTO  MID=ZEMF21I,PLIST=XSAPLST,                              +
+               V1=MSTEMODN,            exit name                       +
+               V2==CL12'deleted from', function                        +
+               V3=MSTEXITN             SYS dynamic exit name
+*
+DYNXDXIT DS    0H
+         ZMACS GEN=SUBEXIT,DSA=XSA,OUTPAR=XSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         MODAXQE                                            */
+*/*                                                                  */
+*/* Description:  Activate ZXQE exit-related queue                   */
+*/*                                                                  */
+*/* Input Regs:   R7  MSTE address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R6  ZQUE address                                   */
+*/*               R8  ZXQE address                                   */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R1  Return code                                    */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+MODAXQE  ZMACS GEN=SUBENTY,DSA=XSA,SUBSAVE=XSANSTR
+         USING ZEVT,R11
+         LA    R6,ZEVTQUES             ZQUE
+         USING ZQUE,R6
+*
+**       Validity check state request
+*
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+         TM    XSAFLG2,XSA@ACTX        active request?
+         BNZ   MODA000                 yes
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN84)      RSN
+         B     MODAXIT                 exit
+*
+**       Locate target ZXQE exit queue
+*
+MODA000  DS    0H
+         CLC   QUEZXQEA,=A(-1)         EoQs?
+         BE    MODAXIT                 yes, exit
+         ICM   R8,15,QUEZXQEA          ZXQE queue init?
+         BZ    MODA099                 no, next queue
+         USING ZXQE,R8
+         CLC   QUEXNAME,XSAEXIT        exit name match?
+         BNE   MODA099                 no, next queue
+*
+**       Activate ZXQE queue elements
+*
+MODA010  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        ZXQE?
+         BNE   MODAXIT                 no, exit
+         OI    XQESTATE,XQE@ACTV       yes, mark it active
+         ICM   R8,15,XQECHPTR          next ZXQE?
+         BNZ   MODA010                 yes, loop
+         OI    XSAFLG2,XSA@XQEC        ZXQE changed indicator
+*
+MODA099  DS    0H
+         LA    R6,QUE@SIZE(,R6)        ZQUE entry size
+         B     MODA000                 process next queue
+*
+MODAXIT  DS    0H
+         ZMACS GEN=SUBEXIT,DSA=XSA,OUTPAR=XSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         MODIXQE                                            */
+*/*                                                                  */
+*/* Description:  Inactivate ZXQE exit-related queue                 */
+*/*                                                                  */
+*/* Input Regs:   R7  MSTE address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R6  ZQUE address                                   */
+*/*               R8  ZXQE address                                   */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R1  Return code                                    */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+MODIXQE  ZMACS GEN=SUBENTY,DSA=XSA,SUBSAVE=XSANSTR
+         USING ZEVT,R11
+         LA    R6,ZEVTQUES             ZQUE
+         USING ZQUE,R6
+*
+**       Validity check state request
+*
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+         TM    XSAFLG2,XSA@INAX        inactivate request?
+         BNZ   MODI000                 yes
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN88)      RSN
+         B     MODIXIT                 exit
+*
+**       Locate target ZXQE exit queue
+*
+MODI000  DS    0H
+         CLC   QUEZXQEA,=A(-1)         EoQs?
+         BE    MODIXIT                 yes, exit
+         ICM   R8,15,QUEZXQEA          ZXQE queue init?
+         BZ    MODI099                 no, next queue
+         USING ZXQE,R8
+         CLC   QUEXNAME,XSAEXIT        exit name match?
+         BNE   MODI099                 no, next queue
+*
+**       inactivate ZXQE queue elements
+*
+MODI010  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        ZXQE?
+         BNE   MODIXIT                 no, exit
+         NI    XQESTATE,XFF-XQE@ACTV   yes, mark it inactive
+         ICM   R8,15,XQECHPTR          next ZXQE?
+         BNZ   MODI010                 yes, loop
+         OI    XSAFLG2,XSA@XQEC        ZXQE changed indicator
+*
+MODI099  DS    0H
+         LA    R6,QUE@SIZE(,R6)        ZQUE entry size
+         B     MODI000                 process next queue
+*
+MODIXIT  DS    0H
+         ZMACS GEN=SUBEXIT,DSA=XSA,OUTPAR=XSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         MODZXQE                                            */
+*/*                                                                  */
+*/* Description:  Modify all ZXQE exit-related queues                */
+*/*                                                                  */
+*/* Input Regs:   R7  MSTE address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*               R15 Entry address                                  */
+*/*                                                                  */
+*/* Regs Usage:   R6  ZQUE address                                   */
+*/*               R8  ZXQE address                                   */
+*/*               R10 Base address                                   */
+*/*               R11 ZEVT address                                   */
+*/*               R12 XSA  address                                   */
+*/*               R13 Savearea address                               */
+*/*               R14 Return address                                 */
+*/*                                                                  */
+*/* Output Regs:  R1  Return code                                    */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+MODZXQE  ZMACS GEN=SUBENTY,DSA=XSA,SUBSAVE=XSANSTR
+         USING ZEVT,R11
+         LA    R6,ZEVTQUES             ZQUE
+         USING ZQUE,R6
+*
+**       Validity check state request
+*
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+         TM    XSAFLG2,XSA@ALLX        all exits request?
+         BNZ   MODZ000                 yes
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN92)      RSN
+         B     MODZXIT                 exit
+*
+**       Locate target ZXQE exit queue
+*
+MODZ000  DS    0H
+         CLC   QUEZXQEA,=A(-1)         EoQs?
+         BE    MODZXIT                 yes, exit
+         ICM   R8,15,QUEZXQEA          ZXQE queue init?
+         BZ    MODZ099                 no, next queue
+         USING ZXQE,R8
+*
+**       Activate ZXQE queue elements
+*
+MODZ010  DS    0H
+         TM    XSAFLG2,XSA@ACTX        activate request?
+         BZ    MODZ030                 no
+*
+MODZ020  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        ZXQE?
+         BNE   MODZ099                 no, next queue
+         OI    XQESTATE,XQE@ACTV       yes, mark it active
+         ICM   R8,15,XQECHPTR          next ZXQE?
+         BNZ   MODZ020                 yes, loop
+         OI    XSAFLG2,XSA@XQEC        XQE changed indicator
+         B     MODZ099                 next queue
+
+*
+MODZ030  DS    0H
+         TM    XSAFLG2,XSA@INAX        inactivate request?
+         BZ    MODZXIT                 no, exit
+*
+MODZ040  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        ZXQE?
+         BNE   MODZ099                 no, next queue
+         NI    XQESTATE,XFF-XQE@ACTV   yes, mark it inactive
+         ICM   R8,15,XQECHPTR          next ZXQE?
+         BNZ   MODZ040                 yes, loop
+         OI    XSAFLG2,XSA@XQEC        XQE changed indicator
+*
+MODZ099  DS    0H
+         LA    R6,QUE@SIZE(,R6)        ZQUE entry size
+         B     MODZ000                 process next queue
+*
+MODZXIT  DS    0H
+         ZMACS GEN=SUBEXIT,DSA=XSA,OUTPAR=XSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         CSVDYNEX dynamic exits name table                  */
+*/*                                                                  */
+*/* Description:  Generates dynamic exits table entries              */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ZTABDYNT DS    0F
+ZTABDYNE ZTABS GEN=DYN,DSECT=NO    CSVDYNEX exit table
+ZTABDYNZ EQU   *-ZTABDYNT          CSVDYNEX exit table size
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         Exit subsystem IDs parameter table                 */
+*/*                                                                  */
+*/* Description:  Generates dynamic exits table                      */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ZSUBKEYT DS    0F
+ZSUBKEYE ZTABS GEN=KEY,DSECT=NO    Exit keyword parameter table
+ZSUBKEYZ EQU   *-ZSUBKEYT          Exit keyword parameter table size
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         Variables name table                               */
+*/*                                                                  */
+*/* Description:  Defines subsystem server variables                 */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ZGENVART DS    0F
+ZGENVARE ZTABS GEN=VAR,DSECT=NO    variables name table
+ZGENVARZ EQU   *-ZGENVART          variables name table size
+*---------------------------------------------------------------------*
+*        Subsystem Server Data Areas                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+         ZTABS GEN=KEY,DSECT=YES
+         ZTABS GEN=DYN,DSECT=YES
+         DCBD  DSORG=PO,DEVD=DA
+         ZEVT  DSECT=YES,LIST=YES
+         END ,

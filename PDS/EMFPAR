@@ -1,0 +1,3142 @@
+EMFPAR   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        EMFPAR                                              */
+*/*                                                                  */
+*/* Function:    PARMLIB exit parameters parser routine              */
+*/*                                                                  */
+*/* Description: Parse parameter data on behalf of the following     */
+*/*              exit calls:                                         */
+*/*                                                                  */
+*/*              IEFUTL    Time limit exit                           */
+*/*              IEFUSO    SYSOUT limit exit                         */
+*/*              IEFUJP    Job purge exit                            */
+*/*              IEFU29    SMF dump exit                             */
+*/*              IEFU29L   SMF log stream dump exit                  */
+*/*              IEFU83    SMF record exit                           */
+*/*              IEFU84    SMF record exit                           */
+*/*              IEFU85    SMF record exit                           */
+*/*              IEFU86    SMF record exit                           */
+*/*                                                                  */
+*/* Input Regs:  R1  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R13 Savearea address                                */
+*/*              R2-R12 restored                                     */
+*/*              R14 return address                                  */
+*/*              R0  Reason code                                     */
+*/*              R1  output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+EMFPAR   AMODE 31
+EMFPAR   RMODE ANY
+         COPY  ZGBLS
+         USING EMFPAR,R15              Entry
+         STM   R14,R12,GPR@R14(R13)    caller regs
+         B     PAR0000                 branch
+         ZMACS GEN=MID,DSECT=NO        MID
+*
+PAR0000  DS    0H
+         DROP  R15
+         LR    R10,R15                 base
+         USING EMFPAR,R10
+         LR    R8,R1                   XSA
+         USING XSA,R8
+         USING ZEVT,R11
+         L     R6,XSAZPARA             ZPAR
+         USING ZPAR,R6
+*
+**       Obtain dynamic storage area
+*
+         LA    R3,DSA@SIZE
+         STORAGE OBTAIN,LOC=ANY,COND=NO,                               +
+               LENGTH=(R3),SP=&SP230,LINKAGE=SYSTEM
+         LR    R12,R1
+         USING DSA,R12
+         LR    R2,R12                  DSA address
+         XR    R15,R15                 zero
+         MVCL  R2,R14                  scrub DSA
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1                  mainline savearea
+         ZTRCE PAR=0,LINKAGE=LOCAL     trace
+*
+**       Initialize common exit fields
+*
+         L     R3,XSAMSTRE             MSTR table entry
+         USING MSTR,R3
+         MVC   DSAPOSIT,MSTRPOS        dynamic state position
+         MVC   DSASTATE,MSTRSTAT       dynamic exit state
+         MVC   DSAMEMBR,MSTRNAME       exit member name
+         MVC   DSADYNAM,MSTRDYNM       dynamic exit name
+         DROP  R3
+*
+**       Locate exit parser routine
+*
+         LA    R5,KEYWTBLE             keywords table
+         USING KEYW,R5
+*
+PAR0010  DS    0H
+         CLC   KEYWEPA,=A(-1)          end of table?
+         BNE   PAR0020                 no
+         ZTRCE PAR=1,LINKAGE=LOCAL     trace
+*
+**       Exit name not found in table
+*
+         XC    XSAOGR1,XSAOGR1         OPAR
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN348)     RSN
+         ZWTO  MID=ZEMF34E,V1=XSAEXIT,V2=XSARSN
+         B     PAREXIT                 exit
+*
+PAR0020  DS    0H
+         CLC   KEYWMEM,XSAEXIT         exit member name match?
+         BE    PAR0030                 yes
+         LA    R5,KEYW@SZE(,R5)        next entry
+         ZTRCE PAR=2,LINKAGE=LOCAL     trace
+         B     PAR0010                 loop
+*
+**       Parse jobname parameter
+*
+PAR0030  DS    0H
+         ST    R5,DSAKEYWA             save KEYW address
+         MVC   DSAOFFST,KEYWQUE        staging queue offset
+         ZCALL SR=JOBPAR
+         LTR   R15,R15                 successful?
+         BZ    PAR0040                 yes
+         STM   R15,R1,XSAOPAR          RC; RSN; output parm
+         B     PAREXIT                 exit
+*
+**       Check for duplicate ZXQEs
+*
+PAR0040  DS    0H
+         ICM   R7,15,DSAOFFST          queue offset init?
+         BNZ   PAR0050                 yes
+         XC    XSAOGR1,XSAOGR1         OPAR
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN380)     RSN
+         B     PAREXIT                 exit
+*
+PAR0050  DS    0H
+         LA    R7,0(R7,R8)             XSA staging queue ptr
+         ICM   R7,15,0(R7)             ZXQEs queued?
+         BZ    PAR0060                 no, carry on
+         ZCALL SR=DUPZXQE
+         LTR   R15,R15                 duplicate found?
+         BZ    PAR0060                 no
+         STM   R15,R1,XSAOPAR          RC; RSN; output parm
+         B     PAREXIT                 exit
+*
+**       Check ZEXT requirement
+*
+PAR0060  DS    0H
+         CLI   KEYWOPTS,KEY@EXTR       ZEXT required?
+         BNE   PAR0065                 no
+         OI    DSAFLG2,DSA@EXTR        yes
+*
+**       Obtain ZXQE cell element
+*
+PAR0065  DS    0H
+         ZCALL SR=INIZXQE
+         LTR   R15,R15                 successful?
+         BZ    PAR0070                 yes
+         STM   R15,R1,XSAOPAR          RC; RSN; output parm
+         B     PAREXIT                 exit
+*
+**       Parse exit-related keywords
+*
+PAR0070  DS    0H
+         L     R7,XSAZXQEA             ZXQE cell address
+         USING ZXQE,R7
+*
+PAR0080  DS    0H
+         MVC   DSAKDATA,ZPARDATA       error data
+         CLC   KEYWEPA,=A(-1)          end of table?
+         BE    PAR0140                 yes, exit loop
+         CLC   KEYWMEM,XSAEXIT         exit-related entry?
+         BE    PAR0090                 yes
+         CLC   KEYWMEM,=CL8'COMMON'    common entry
+         BNE   PAR0130                 no, next entry
+*
+PAR0090  DS    0H
+         L     R3,ZPARLEN              parmdata length
+         LA    R4,ZPARDATA             parmdata address
+         LH    R2,KEYWORDL             keyword name length
+         BCTR  R2,0
+*
+PAR0100  DS    0H
+         EX    R2,PARCOMP              keyword match?
+         BE    PAR0110                 yes
+         LA    R4,1(,R4)               walk thru parmdata
+         BCT   R3,PAR0100              loop on parmdata
+         B     PAR0130                 next table entry
+*
+PAR0110  DS    0H
+         ST    R4,DSAZPARE             ZPAR keyword address
+         L     R15,KEYWEPA             parse routine
+         BSM   R15,0                   AMODE
+         BASR  R14,R15                 parse keyword
+         LTR   R15,R15                 successful?
+         BZ    PAR0120                 yes
+         STM   R15,R1,XSAOPAR          RC; RSN; output parm
+         B     PAR0160                 free ZXQE/ZEXT elements
+*
+PAR0120  DS    0H
+         OI    DSAFLG1,DSA@KEYF        keyword processed
+*
+PAR0130  DS    0H
+         LA    R5,KEYW@SZE(,R5)        next table entry
+         B     PAR0080                 loop
+*
+PAR0140  DS    0H
+         TM    DSAFLG1,DSA@KEYF        keywords processed?
+         BZ    PAR0150                 no, error
+*
+**       Add ZXQE to staging queue
+*
+         L     R3,DSAOFFST             queue offset
+         LA    R3,0(R3,R8)             queue address ptr
+         MVC   XQECHPTR,0(R3)          chain ZXQE
+         ST    R7,0(R3)                push ZXQE on queue
+         B     PAR0999                 exit
+*
+**       Invalid keyword parmdata
+*
+PAR0150  DS    0H
+         XC    XSAOGR1,XSAOGR1         OPAR
+         MVC   XSARC,=AL4(RC8)         RC
+         MVC   XSARSN,=AL4(RSN372)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+*
+**       Free ZXQE cell element
+*
+PAR0160  DS    0H
+         ICM   R3,15,XSAZXQEA          free required?
+         BZ    PAR0170                 no
+         XC    XSAZXQEA,XSAZXQEA       zero cell address
+         CPOOL FREE,                   free cell                       +
+               CPID=XSACPID,           cell pool ID                    +
+               CELL=(R3),              cell                            +
+               REGS=SAVE               protect my regs
+*
+**       Free ZEXT cell element
+*
+PAR0170  DS    0H
+         ICM   R3,15,XSAZEXTA          free required?
+         BZ    PAREXIT                 no, exit
+         XC    XSAZEXTA,XSAZEXTA       zero cell address
+         CPOOL FREE,                   free cell                       +
+               CPID=XSACPXT,           cell pool ID                    +
+               CELL=(R3),              cell                            +
+               REGS=SAVE               protect my regs
+         B     PAREXIT                 exit
+*
+**       Parse successfully complete
+*
+PAR0999  DS    0H
+         XC    XSARC,XSARC             RC
+         XC    XSARSN,XSARSN           RSN
+         XC    XSAOGR1,XSAOGR1         OPAR
+         B     PAREXIT                 exit
+*---------------------------------------------------------------------*
+*        Normal Exit                                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+PAREXIT  DS    0H
+         L     R13,GPR@BWD(,R13)       caller savearea
+         STORAGE RELEASE,COND=NO,SP=&SP230,                            +
+               ADDR=(R12),LENGTH=DSA@SIZE,LINKAGE=SYSTEM
+         LM    R14,R12,GPR@R14(R13)    restore regs
+         BR    R14                     exit
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+PARCOMP  CLC   0(*-*,R4),KEYWORDN
+*---------------------------------------------------------------------*
+*                                                                     *
+*        Exit-related keywords table                                  *
+*              +00 exit name                                          *
+*              +08 exit routine EPA                                   *
+*              +12 staging queue offset                               *
+*              +16 ZEXT element indicator                             *
+*              +17 SMF={N|Y} indicator                                *
+*              +18 COMMAND={N|Y} indicator                            *
+*              +19 reserved                                           *
+*              +20 max parm value length                              *
+*              +22 keyword length                                     *
+*              +24 keyword name                                       *
+*                                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+KEYWTBLE DS    0F
+*
+**       IEFUTL keywords table entries
+*
+XUTL01   DS    0F
+         DC    CL8'IEFUTL'        IEFUTL
+         DC    A(UTLJCPU)         exit routine EPA
+         DC    AL4(XSAUTLQ-XSA)   staging queue offset
+         DC    AL1(KEY@EXTR)      ZEXT element required
+         DC    CL1'Y'             SMF=Y
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(4)             max parmdata length
+         DC    AL2(7)             keyword name length
+         DC    CL16'JOBCPU='      keyword name
+XUTL01L  EQU   *-XUTL01
+XUTL02   DS    0F
+         DC    CL8'IEFUTL'        IEFUTL
+         DC    A(UTLJTUC)         exit routine EPA
+         DC    AL4(XSAUTLQ-XSA)   staging queue offset
+         DC    AL1(KEY@EXTR)      ZEXT element required
+         DC    CL1'Y'             SMF=Y
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(8)             max parmdata length
+         DC    AL2(8)             keyword name length
+         DC    CL16'TUJBCPU='     keyword name
+XUTL02L  EQU   *-XUTL02
+XUTL03   DS    0F
+         DC    CL8'IEFUTL'        IEFUTL
+         DC    A(UTLSCPU)         exit routine EPA
+         DC    AL4(XSAUTLQ-XSA)   staging queue offset
+         DC    AL1(KEY@EXTR)      ZEXT element required
+         DC    CL1'Y'             SMF=N
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(4)             max parmdata length
+         DC    AL2(8)             keyword name length
+         DC    CL16'STEPCPU='     keyword name
+XUTL03L  EQU   *-XUTL03
+XUTL04   DS    0F
+         DC    CL8'IEFUTL'        IEFUTL
+         DC    A(UTLSTUC)         exit routine EPA
+         DC    AL4(XSAUTLQ-XSA)   staging queue offset
+         DC    AL1(KEY@EXTR)      ZEXT element required
+         DC    CL1'Y'             SMF=N
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(8)             max parmdata length
+         DC    AL2(9)             keyword name length
+         DC    CL16'TUSTPCPU='    keyword name
+XUTL04L  EQU   *-XUTL04
+XUTL05   DS    0F
+         DC    CL8'IEFUTL'        IEFUTL
+         DC    A(UTLTIME)         exit routine EPA
+         DC    AL4(XSAUTLQ-XSA)   staging queue offset
+         DC    AL1(KEY@EXTR)      ZEXT element required
+         DC    CL1'Y'             SMF=Y
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(4)             max parmdata length
+         DC    AL2(9)             keyword name length
+         DC    CL16'WAITTIME='    keyword name
+XUTL05L  EQU   *-XUTL05
+*
+**       IEFUSO keywords table entries
+*
+XUSO01   DS    0F
+         DC    CL8'IEFUSO'        IEFUSO
+         DC    A(IEFUSO)          exit routine EPA
+         DC    AL4(XSAUSOQ-XSA)   staging queue offset
+         DC    AL1(KEY@EXTR)      ZEXT element required
+         DC    CL1'Y'             SMF=Y
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(8)             max parmdata length
+         DC    AL2(7)             keyword name length
+         DC    CL16'SYSOUT='      keyword name
+XUSO01L  EQU   *-XUSO01
+*
+**       IEFUJP keywords table entries
+*
+XUJP01   DS    0F
+         DC    CL8'IEFUJP'        IEFUJP
+         DC    A(IEFUJP)          exit routine EPA
+         DC    AL4(XSAUJPQ-XSA)   staging queue offset
+         DC    AL1(KEY@NONE)      ZEXT element not required
+         DC    CL1'N'             SMF=N
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(3)             max parmdata length
+         DC    AL2(6)             keyword name length
+         DC    CL16'PURGE='       keyword name
+XUJP01L  EQU   *-XUJP01
+*
+**       IEFU29 keywords table entries
+*
+XU2901   DS    0F
+         DC    CL8'IEFU29'        IEFU29
+         DC    A(U29DUMP)         exit routine EPA
+         DC    AL4(XSAU29Q-XSA)   staging queue offset
+         DC    AL1(KEY@NONE)      ZEXT element not required
+         DC    CL1'N'             SMF=N
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(60)            max command length
+         DC    AL2(8)             keyword name length
+         DC    CL16'DUMPCMD='     keyword name
+XU2901L  EQU   *-XU2901
+XU2902   DS    0F
+         DC    CL8'IEFU29'        IEFU29
+         DC    A(U29MSGS)         exit routine EPA
+         DC    AL4(XSAU29Q-XSA)   staging queue offset
+         DC    AL1(KEY@NONE)      ZEXT element not required
+         DC    CL1'N'             SMF=N
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(3)             max parmdata length
+         DC    AL2(8)             keyword name length
+         DC    CL16'DUMPMSG='     keyword name
+XU2902L  EQU   *-XU2902
+*
+**       IEFU29L keywords table entries
+*
+XU29L1   DS    0F
+         DC    CL8'IEFU29L'       IEFU29L
+         DC    A(U29LDMP)         exit routine EPA
+         DC    AL4(XSA29LQ-XSA)   staging queue offset
+         DC    AL1(KEY@NONE)      ZEXT element not required
+         DC    CL1'N'             SMF=N
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(60)            max parmdata length
+         DC    AL2(8)             keyword name length
+         DC    CL16'DUMPCMD='     keyword name
+XU29L1L  EQU   *-XU29L1
+*
+**       IEFU83 keywords table entries
+*
+XU8301   DS    0F
+         DC    CL8'IEFU83'        IEFU83
+         DC    A(IEFU83)          exit routine EPA
+         DC    AL4(XSAU83Q-XSA)   staging queue offset
+         DC    AL1(KEY@NONE)      ZEXT element not required
+         DC    CL1'N'             SMF=N
+         DC    CL1'Y'             COMMAND=Y
+         DC    AL1(0)             -reserved
+         DC    AL2(60)            max parmdata length
+         DC    AL2(9)             keyword name length
+         DC    CL16'SUPPRESS='    keyword name
+XU8301L  EQU   *-XU8301
+*
+**       IEFU84 keywords table entries
+*
+XU8401   DS    0F
+         DC    CL8'IEFU84'        IEFU84
+         DC    A(IEFU84)          exit routine EPA
+         DC    AL4(XSAU84Q-XSA)   staging queue offset
+         DC    AL1(KEY@NONE)      ZEXT element not required
+         DC    CL1'N'             SMF=N
+         DC    CL1'N'             COMMAND=N
+         DC    AL1(0)             -reserved
+         DC    AL2(60)            max parmdata length
+         DC    AL2(9)             keyword name length
+         DC    CL16'SUPPRESS='    keyword name
+XU8401L  EQU   *-XU8401
+*
+**       IEFU85 keywords table entries
+*
+XU8501   DS    0F
+         DC    CL8'IEFU85'        IEFU85
+         DC    A(IEFU85)          exit routine EPA
+         DC    AL4(XSAU85Q-XSA)   staging queue offset
+         DC    AL1(KEY@NONE)      ZEXT element not required
+         DC    CL1'N'             SMF=N
+         DC    CL1'N'             COMMAND=N
+         DC    AL1(0)             -reserved
+         DC    AL2(60)            max parmdata length
+         DC    AL2(9)             keyword name length
+         DC    CL16'SUPPRESS='    keyword name
+XU8501L  EQU   *-XU8501
+*
+**       IEFU86 keywords table entries
+*
+XU8601   DS    0F
+         DC    CL8'IEFU86'        IEFU86
+         DC    A(IEFU86)          exit routine EPA
+         DC    AL4(XSAU86Q-XSA)   staging queue offset
+         DC    AL1(KEY@NONE)      ZEXT element not required
+         DC    CL1'N'             SMF=N
+         DC    CL1'N'             COMMAND=N
+         DC    AL1(0)             -reserved
+         DC    AL2(60)            max parmdata length
+         DC    AL2(9)             keyword name length
+         DC    CL16'SUPPRESS='    keyword name
+XU8601L  EQU   *-XU8601
+*
+**       Common keywords table entries
+*
+XCOM01   DS    0F
+         DC    CL8'COMMON'        common entry
+         DC    A(WARNWTO)         exit routine EPA
+         DC    AL4(0)             null staging queue offset
+         DC    AL1(0)             null value
+         DC    CL1' '             null value
+         DC    CL1' '             null value
+         DC    AL1(0)             -reserved
+         DC    AL2(3)             max parmdata length
+         DC    AL2(8)             keyword name length
+         DC    CL16'WARNWTO='     keyword name
+XCOM01Z  EQU   *-XCOM01
+*
+XCOM02   DS    0F
+         DC    CL8'COMMON'        cmmon entry
+         DC    A(OPTSMF)          exit routine EPA
+         DC    AL4(0)             null staging queue offset
+         DC    AL1(0)             null value
+         DC    CL1' '             null value
+         DC    CL1' '             null value
+         DC    AL1(0)             -reserved
+         DC    AL2(3)             max parmdata length
+         DC    AL2(4)             keyword name length
+         DC    CL16'SMF='         keyword name
+XCOM02Z  EQU   *-XCOM02
+*
+XCOM03   DS    0F
+         DC    CL8'COMMON'        cmmon entry
+         DC    A(OPTCMD)          exit routine EPA
+         DC    AL4(0)             null staging queue offset
+         DC    AL1(0)             null value
+         DC    CL1' '             null value
+         DC    CL1' '             null value
+         DC    AL1(0)             -reserved
+         DC    AL2(60)            max command length
+         DC    AL2(08)            keyword name length
+         DC    CL16'COMMAND='     keyword name
+XCOM03Z  EQU   *-XCOM03
+*
+**       Last keyword table entry
+*
+KEYWLAST DS    0F
+         DC    CL8' '             null value
+         DC    A(-1)              last entry marker
+         DC    AL4(0)             null value
+         DC    AL1(0)             null value
+         DC    CL1' '             null value
+         DC    CL1' '             null value
+         DC    AL1(0)             -reserved
+         DC    AL2(0)             null value
+         DC    AL2(0)             null value
+         DC    CL16'LAST_ENTRY'   last entry indicator
+KEYWTBSZ EQU   *-KEYWLAST
+KEYWTBNM EQU   (*-KEYWTBLE)/KEYWTBSZ
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        JOBPAR                                              */
+*/*                                                                  */
+*/* Function:    Parse jobname parameter subroutine                  */
+*/*                                                                  */
+*/* Input Regs:  R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R6  ZPAR address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+JOBPAR   ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING XSA,R8
+         USING ZEVT,R11
+         L     R6,XSAZPARA
+         USING ZPAR,R6
+         L     R2,ZPARLEN              parmdata length
+         LA    R3,ZPARDATA             parmdata address
+         MVC   DSAZDATA,ZPARDATA       error data
+         NI    DSAFLG1,XFF-DSA@JGEN    generic indicator
+         ZTRCE PAR=B,LINKAGE=LOCAL     trace
+*
+JOBP000  DS    0H
+         CLI   0(R3),OPAREN            "("?
+         BE    JOBP010                 yes
+         LA    R3,1(,R3)               walk thru parmdata
+         BCT   R2,JOBP000              loop
+         B     JOBPERR                 error
+*
+JOBP010  DS    0H
+         LA    R3,1(,R3)               skip "("
+         CLI   0(R3),BLANK             jobname supplied?
+         BE    JOBPERR                 no
+         LR    R4,R3                   jobname address
+*
+JOBP020  DS    0H
+         CLI   0(R3),COMMA             ","?
+         BE    JOBP030                 yes
+         LA    R3,1(,R3)               walk thru jobname
+         BCT   R2,JOBP020              loop
+         B     JOBPERR                 error
+*
+JOBP030  DS    0H
+         SLR   R3,R4                   get jobname length
+         CL    R3,=F'8'                valid jobname length?
+         BH    JOBPERR                 no
+         MVC   DSAJOBNM,ZEVTBLKS       scrub w/blanks
+         MVC   DSAJOBSV,ZEVTGENC       scrub w/generics
+         BCTR  R3,0
+         EX    R3,COPYJOB              copy jobname
+         EX    R3,COPYJSV              copy jobname
+         LA    R2,L'DSAJOBNM           jobname length
+         LA    R3,DSAJOBNM             jobname address
+*
+JOBP040  DS    0H
+         CLI   0(R3),GENERIC           generic jobname?
+         BE    JOBP050                 yes
+         LA    R3,1(,R3)               walk thru jobname
+         BCT   R2,JOBP040              loop
+         B     JOBP099                 exit
+*
+JOBP050  DS    0H
+         OI    DSAFLG1,DSA@JGEN        set generic indicator
+         MVC   DSAJOBNM,DSAJOBSV       copy generic jobname
+         ZTRCE PAR=C,LINKAGE=LOCAL     trace
+*
+JOBP099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         B     JOBPXIT                 exit
+*
+JOBPERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN364)     RSN
+*
+JOBPXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYJOB  MVC   DSAJOBNM(*-*),0(R4)
+COPYJSV  MVC   DSAJOBSV(*-*),0(R4)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        DUPZXQE                                             */
+*/*                                                                  */
+*/* Function:    Duplicate ZXQE check subroutine                     */
+*/*                                                                  */
+*/* Input Regs:  R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+DUPZXQE  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         L     R6,XSAZPARA             ZPAR
+         USING ZPAR,R6
+         MVC   DSAZDATA,ZPARDATA       error data
+         ZTRCE PAR=D,LINKAGE=LOCAL     trace
+*
+DUPZ000  DS    0H
+         TM    XQECOMF1,XQE@U29X       IEFU29 SMF dump exit?
+         BNZ   DUPZ010                 yes
+         TM    XQECOMF1,XQE@29LX       IEFU29L SMF dump exit
+         BZ    DUPZ020                 no
+*
+DUPZ010  DS    0H
+         ICM   R3,15,XQECHPTR          more than one staged?
+         BNZ   DUPZ030                 yes, error
+*
+DUPZ020  DS    0H
+         CLC   XQEJOBNM,DSAJOBNM       jobname match?
+         BNE   DUPZ040                 no
+         CLC   XQESUBID,XSASUBID       subsysID match?
+         BNE   DUPZ040                 no
+*
+DUPZ030  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN368)     RSN
+         ZWTO  MID=ZEMF36E,V1=DSAMEMBR,V2=DSAZDATA
+         B     DUPZXIT                 exit
+*
+DUPZ040  DS    0H
+         ICM   R7,15,XQECHPTR          more ZXQEs?
+         BNZ   DUPZ000                 yes, loop
+*
+DUPZ099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+DUPZXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        INIZXQE                                             */
+*/*                                                                  */
+*/* Function:    Init common ZXQE fields subroutine                  */
+*/*                                                                  */
+*/* Input Regs:  R6  MSTR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R6  ZEXT address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+INIZXQE  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=E,LINKAGE=LOCAL     trace
+*
+**       Get ZXQE cell element
+*
+         CPOOL GET,UNCOND,             get unconditional               +
+               CPID=XSACPID,           cell pool ID                    +
+               REGS=SAVE,              protect my regs                 +
+               LINKAGE=SYSTEM
+         LR    R7,R1                   ZXQE
+         USING ZXQE,R7
+         ST    R7,XSAZXQEA             save cell address
+*
+**       Initialize ZXQE element
+*
+         XC    ZXQE(XQE@SIZE),ZXQE
+         MVC   XQEID,=CL4'ZXQE'        ID
+         MVC   XQEPOS,DSAPOSIT         dynamic exit position
+         MVC   XQESTATE,DSASTATE       dynamic exit state
+         MVC   XQEJTYPE,XSAJTYPE       job ID
+         MVC   XQEXNAME,DSAMEMBR       exit member name
+         MVC   XQEDYNAM,DSADYNAM       dynamic exit name
+         MVC   XQESUBID,XSASUBID       {JOB|STC|TSO|OMVS|ASCH}
+         MVC   XQESUBNM,XSASUBNM       {JES2|JES3|STC|TSO|OMVS|ASCH}
+         MVC   XQEJOBNM,DSAJOBNM       jobname
+         MVC   DSANOLIM,ZEVTBLKS       clear NOLIMIT increment
+         MVC   DSAEXTLM,ZEVTBLKS       clear NOLIMIT extension
+         NI    XQECOMF1,XFF-XQE@SMFR   set SMF=NO default
+         NI    XQECOMF1,XFF-XQE@WARN   set WARNWTO=NO default
+         TM    DSAFLG2,DSA@EXTR        ZEXT required?
+         BNZ   INIZ000                 yes
+         OI    XQECOMF1,XQE@EXTZ       no
+*
+INIZ000  DS    0H
+         TM    DSAFLG1,DSA@JGEN        generic jobname?
+         BZ    INIZ010                 no
+         OI    XQECOMF1,XQE@GENR       yes
+         B     INIZ099                 exit
+*
+**       Get ZEXT cell element
+*
+INIZ010  DS    0H
+         TM    XQECOMF1,XQE@EXTZ       ZEXT required?
+         BNZ   INIZ099                 no
+         CPOOL GET,UNCOND,             get unconditional               +
+               CPID=XSACPXT,           cell pool ID                    +
+               REGS=SAVE,              protect my regs                 +
+               LINKAGE=SYSTEM
+         LR    R6,R1                   ZXQE
+         USING ZEXT,R6
+         ST    R6,XSAZEXTA             save cell address
+*
+**       Initialize ZEXT element
+*
+         XC    ZEXT(EXT@SIZE),ZEXT
+         MVC   EXTID,=CL4'ZEXT'        ID
+         ST    R6,XQEZEXTP             chain ZEXT to ZXQE
+         OI    EXTFLG1,EXT@NOGN        non-generic jobname
+         MVC   EXTJOBNM,DSAJOBNM       propagate jobname
+         MVC   EXTXNAME,XQEXNAME       propagate exit name
+*
+INIZ099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+INIZXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        UTLJCPU                                             */
+*/*                                                                  */
+*/* Exit:        IEFUTL                                              */
+*/*                                                                  */
+*/* Function:    JOBCPU= parse parameter subroutine                  */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+UTLJCPU  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=F,LINKAGE=LOCAL     trace
+*
+**       Initialize JOBCPU extension
+*
+         ZCALL SR=KEYWPAR
+         LTR   R15,R15                 successful?
+         BNZ   UTLJXIT                 no
+         CLC   DSANOLIM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLJ000                 no
+         XC    XQEJOBCP,XQEJOBCP       zero job CPU seconds
+         OI    XQEUTLF1,XQE@JCPU       set NOLIMIT indicator
+         B     UTLJ020
+*
+UTLJ000  DS    0H
+         ICM   R3,15,DSAKEYPR          job CPU seconds?
+         BZ    UTLJ010                 no
+         MVC   XQEJOBCP,DSAKEYPR       set job CPU seconds
+         NI    XQEUTLF1,XFF-XQE@JCPU   reset NOLIMIT indicator
+         B     UTLJ020
+*
+UTLJ010  DS    0H
+         XC    XQEJOBCP,XQEJOBCP       zero job CPU seconds
+         NI    XQEUTLF1,XFF-XQE@JCPU   reset NOLIMIT indicator
+*
+**       Initialize JOBCPU extension count
+*
+UTLJ020  DS    0H
+         CLC   DSAEXTLM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLJ030                 no
+         XC    XQEJOBXT,XQEJOBXT       zero max extensions allowed
+         OI    XQEUTLF1,XQE@JEXT       set NOLIMIT indicator
+         B     UTLJ099
+*
+UTLJ030  DS    0H
+         ICM   R3,15,DSAEXTPR          job extension?
+         BZ    UTLJ040                 no
+         MVC   XQEJOBXT,DSAEXTPR       set max extensions allowed
+         NI    XQEUTLF1,XFF-XQE@JEXT   reset NOLIMIT indicator
+         B     UTLJ099                 exit
+*
+UTLJ040  DS    0H
+         MVC   XQEJOBXT,=F'1'          one extension allowed
+         NI    XQEUTLF1,XFF-XQE@JEXT   reset NOLIMIT indicator
+*
+UTLJ099  DS    0H
+         OI    DSAFLG1,DSA@JCPU        set processed indicator
+         TM    DSAFLG1,DSA@JTUS        TUJBCPU specified?
+         BZ    UTLJXIT                 no
+*
+**       Duplicate parameters specified
+*
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN384)     RSN
+         ZWTO  MID=ZEMF38E,                                            +
+               V1=DSAMEMBR,V2==CL10'JOBCPU',V3==CL10'TUJBCPU'
+*
+UTLJXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        UTLJTUC                                             */
+*/*                                                                  */
+*/* Exit:        IEFUTL                                              */
+*/*                                                                  */
+*/* Function:    TUJBCPU= parse parameter subroutine                 */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+UTLJTUC  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         OI    XQEUTLF1,XQE@JBTU       indicate timer units
+         ZTRCE PAR=G,LINKAGE=LOCAL     trace
+*
+**       Initialize TUJBCPU extension
+*
+         OI    DSAFLG1,DSA@TUNI        convert to timer units
+         ZCALL SR=KEYWPAR
+         LTR   R15,R15                 successful?
+         BNZ   UTLJTXT                 no
+         NI    DSAFLG1,XFF-DSA@TUNI    reset indicator
+         CLC   DSANOLIM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLJT00                 no
+         XC    XQEJOBCP,XQEJOBCP       zero job CPU timer units
+         OI    XQEUTLF1,XQE@JCPU       set NOLIMIT indicator
+         B     UTLJT20
+*
+UTLJT00  DS    0H
+         ICM   R3,15,DSAKEYPR          job CPU timer units?
+         BZ    UTLJT10                 no
+         MVC   XQEJOBCP,DSAKEYPR       set job CPU timer units
+         NI    XQEUTLF1,XFF-XQE@JCPU   reset NOLIMIT indicator
+         B     UTLJT20
+*
+UTLJT10  DS    0H
+         XC    XQEJOBCP,XQEJOBCP       zero job CPU timer units
+         NI    XQEUTLF1,XFF-XQE@JCPU   reset NOLIMIT indicator
+*
+**       Initialize TUJBCPU extension count
+*
+UTLJT20  DS    0H
+         CLC   DSAEXTLM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLJT30                 no
+         XC    XQEJOBXT,XQEJOBXT       zero max extensions allowed
+         OI    XQEUTLF1,XQE@JEXT       set NOLIMIT indicator
+         B     UTLJT99
+*
+UTLJT30  DS    0H
+         ICM   R3,15,DSAEXTPR          job extension?
+         BZ    UTLJT40                 no
+         MVC   XQEJOBXT,DSAEXTPR       set max extensions allowed
+         NI    XQEUTLF1,XFF-XQE@JEXT   reset NOLIMIT indicator
+         B     UTLJT99
+*
+UTLJT40  DS    0H
+         MVC   XQEJOBXT,=F'1'          one extension allowed
+         NI    XQEUTLF1,XFF-XQE@JEXT   reset NOLIMIT indicator
+*
+UTLJT99  DS    0H
+         OI    DSAFLG1,DSA@JTUS        set processed indicator
+         TM    DSAFLG1,DSA@JCPU        JOBCPU specified?
+         BZ    UTLJTXT                 no
+*
+**       Duplicate parameters specified
+*
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN384)     RSN
+         ZWTO  MID=ZEMF38E,                                            +
+               V1=DSAMEMBR,V2==CL10'TUJBCPU',V3==CL10'JOBCPU'
+*
+UTLJTXT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        UTLSCPU                                             */
+*/*                                                                  */
+*/* Exit:        IEFUTL                                              */
+*/*                                                                  */
+*/* Function:    STEPCPU= parse parameter subroutine                 */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+UTLSCPU  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=H,LINKAGE=LOCAL     trace
+*
+**       Initialize STEPCPU extension
+*
+         ZCALL SR=KEYWPAR
+         LTR   R15,R15                 successful?
+         BNZ   UTLSXIT                 no
+         CLC   DSANOLIM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLS000                 no
+         XC    XQESTPCP,XQESTPCP       zero step CPU seconds
+         OI    XQEUTLF1,XQE@SCPU       set NOLIMIT indicator
+         B     UTLS020
+*
+UTLS000  DS    0H
+         ICM   R3,15,DSAKEYPR          step CPU seconds?
+         BZ    UTLS010                 no
+         MVC   XQESTPCP,DSAKEYPR       set step CPU seconds
+         NI    XQEUTLF1,XFF-XQE@SCPU   reset NOLIMIT indicator
+         B     UTLS020
+*
+UTLS010  DS    0H
+         XC    XQESTPCP,XQESTPCP       zero step CPU seconds
+         NI    XQEUTLF1,XFF-XQE@SCPU   reset NOLIMIT indicator
+*
+**       Initialize STEPCPU extension count
+*
+UTLS020  DS    0H
+         CLC   DSAEXTLM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLS030                 no
+         XC    XQESTPXT,XQESTPXT       zero step extension count
+         OI    XQEUTLF1,XQE@SEXT       set NOLIMIT indicator
+         B     UTLS099
+*
+UTLS030  DS    0H
+         ICM   R3,15,DSAEXTPR          step extension count?
+         BZ    UTLS040                 no
+         MVC   XQESTPXT,DSAEXTPR       set step extension count
+         NI    XQEUTLF1,XFF-XQE@SEXT   reset NOLIMIT indicator
+         B     UTLS099
+*
+UTLS040  DS    0H
+         MVC   XQESTPXT,=F'1'          one extension allowed
+         NI    XQEUTLF1,XFF-XQE@SEXT   reset NOLIMIT indicator
+*
+UTLS099  DS    0H
+         OI    DSAFLG1,DSA@SCPU        set processed indicator
+         TM    DSAFLG1,DSA@STUS        TUSTPCPU specified?
+         BZ    UTLSXIT                 no
+*
+**       Duplicate parameters specified
+*
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN384)     RSN
+         ZWTO  MID=ZEMF38E,                                            +
+               V1=DSAMEMBR,V2==CL10'STEPCPU',V3==CL10'TUSTPCPU'
+*
+UTLSXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        UTLSTUC                                             */
+*/*                                                                  */
+*/* Exit:        IEFUTL                                              */
+*/*                                                                  */
+*/* Function:    TUSTPCPU= parse parameter subroutine                */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+UTLSTUC  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         OI    XQEUTLF1,XQE@STTU       indicate timer units
+         ZTRCE PAR=I,LINKAGE=LOCAL     trace
+*
+**       Initialize TUSTPCPU extension
+*
+         OI    DSAFLG1,DSA@TUNI        indicate timer units
+         ZCALL SR=KEYWPAR
+         LTR   R15,R15                 successful?
+         BNZ   UTLSTXT                 no
+         NI    DSAFLG1,XFF-DSA@TUNI    reset indicator
+         CLC   DSANOLIM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLST00                 no
+         XC    XQESTPCP,XQESTPCP       zero step CPU timer units
+         OI    XQEUTLF1,XQE@SCPU       set NOLIMIT indicator
+         B     UTLST20
+*
+UTLST00  DS    0H
+         ICM   R3,15,DSAKEYPR          step CPU timer units?
+         BZ    UTLST10                 no
+         MVC   XQESTPCP,DSAKEYPR       set step CPU timer units
+         NI    XQEUTLF1,XFF-XQE@SCPU   reset NOLIMIT indicator
+         B     UTLST20
+*
+UTLST10  DS    0H
+         XC    XQESTPCP,XQESTPCP       zero step CPU timer units
+         NI    XQEUTLF1,XFF-XQE@SCPU   reset NOLIMIT indicator
+*
+**       Initialize TUSTPCPU extension count
+*
+UTLST20  DS    0H
+         CLC   DSAEXTLM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLST30                 no
+         XC    XQESTPXT,XQESTPXT       zero step extension count
+         OI    XQEUTLF1,XQE@SEXT       set NOLIMIT indicator
+         B     UTLST99
+*
+UTLST30  DS    0H
+         ICM   R3,15,DSAEXTPR          step extension count?
+         BZ    UTLST40                 no
+         MVC   XQESTPXT,DSAEXTPR       set step extension count
+         NI    XQEUTLF1,XFF-XQE@SEXT   reset NOLIMIT indicator
+         B     UTLST99
+*
+UTLST40  DS    0H
+         MVC   XQESTPXT,=F'1'          one extension allowed
+         NI    XQEUTLF1,XFF-XQE@SEXT   reset NOLIMIT indicator
+*
+UTLST99  DS    0H
+         OI    DSAFLG1,DSA@STUS        set processed indicator
+         TM    DSAFLG1,DSA@SCPU        STEPCPU specified?
+         BZ    UTLSTXT                 no
+*
+**       Duplicate parameters specified
+*
+         MVC   DSARC,=AL4(RC8)         RC
+         ZWTO  MID=ZEMF38E,                                            +
+               V1=DSAMEMBR,V2==CL10'TUSTPCPU',V3==CL10'STEPCPU'
+*
+UTLSTXT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        UTLTIME                                             */
+*/*                                                                  */
+*/* Exit:        IEFUTL                                              */
+*/*                                                                  */
+*/* Function:    WAITTIME= parse parameter subroutine                */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+UTLTIME  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=J,LINKAGE=LOCAL     trace
+*
+**       Copy current SMF job wait time
+*
+         USING PSA,0
+         L     R3,FLCCVT               CVT
+         USING CVT,R3
+         ICM   R3,15,CVTSMCA           SMCA?
+         BZ    UTLT000                 no
+         USING SMCABASE,R3
+         MVC   DSAJWTS,SMCAJWT         SMCA JWT() binary seconds
+         MVC   DSASJWT,SMCASJWT        SMFPRMxx JWT(hhmm) value
+         DROP  R0,R3
+*
+**       Initialize WAITTIME extension
+*
+UTLT000  DS    0H
+         ZCALL SR=KEYWPAR
+         LTR   R15,R15                 successful?
+         BNZ   UTLTXIT                 no
+         CLC   DSANOLIM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLT010                 no
+         XC    XQEWTIME,XQEWTIME       zero wait time seconds
+         OI    XQEUTLF1,XQE@WTME       set NOLIMIT indicator
+         B     UTLT030
+*
+UTLT010  DS    0H
+         ICM   R3,15,DSAKEYPR          wait time seconds?
+         BZ    UTLT020                 no
+         MVC   XQEWTIME,DSAKEYPR       set wait time seconds
+         NI    XQEUTLF1,XFF-XQE@WTME   reset NOLIMIT indicator
+         B     UTLT030
+*
+UTLT020  DS    0H
+         XC    XQEWTIME,XQEWTIME       zero wait time seconds
+         NI    XQEUTLF1,XFF-XQE@WTME   reset NOLIMIT indicator
+*
+**       Initialize WAITTIME extension count
+*
+UTLT030  DS    0H
+         CLC   DSAEXTLM,ZEVTNLMT       NOLIMIT?
+         BNE   UTLT040                 no
+         XC    XQEWAITX,XQEWAITX       zero wait time extension
+         OI    XQEUTLF1,XQE@WEXT       set NOLIMIT indicator
+         B     UTLTXIT                 exit
+*
+UTLT040  DS    0H
+         ICM   R3,15,DSAEXTPR          wait time extension?
+         BZ    UTLT050                 no
+         MVC   XQEWAITX,DSAEXTPR       set wait time extension
+         NI    XQEUTLF1,XFF-XQE@WEXT   reset NOLIMIT indicator
+         B     UTLTXIT                 exit
+*
+UTLT050  DS    0H
+         MVC   XQEWAITX,=F'1'          one extension allowed
+         NI    XQEUTLF1,XFF-XQE@WEXT   reset NOLIMIT indicator
+*
+UTLTXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFUSO                                              */
+*/*                                                                  */
+*/* Exit:        IEFUSO                                              */
+*/*                                                                  */
+*/* Function:    SYSOUT= parse parameter subroutine                  */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFUSO   ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=F,LINKAGE=LOCAL     trace
+*
+**       Initialize SYSOUT extension
+*
+         ZCALL SR=KEYWPAR
+         LTR   R15,R15                 successful?
+         BNZ   USOSXIT                 no
+         CLC   DSANOLIM,ZEVTNLMT       NOLIMIT?
+         BNE   USOS000                 no
+         XC    XQEOUTSL,XQEOUTSL       zero SYSOUT increment lines
+         OI    XQEUXTF1,XQE@OUTL       set NOLIMIT indicator
+         B     USOS020
+*
+USOS000  DS    0H
+         ICM   R3,15,DSAKEYPR          SYSOUT increment lines?
+         BZ    USOS010                 no
+         MVC   XQEOUTSL,DSAKEYPR       set SYSOUT increment lines
+         NI    XQEUXTF1,XFF-XQE@OUTL   reset NOLIMIT indicator
+         B     USOS020
+*
+USOS010  DS    0H
+         XC    XQEOUTSL,XQEOUTSL       zero SYSOUT increment lines
+         NI    XQEUXTF1,XFF-XQE@OUTL   reset NOLIMIT indicator
+*
+**       Initialize SYSOUT extension count
+*
+USOS020  DS    0H
+         CLC   DSAEXTLM,ZEVTNLMT       NOLIMIT?
+         BNE   USOS030                 no
+         XC    XQEOUTXL,XQEOUTXL       zero max extensions allowed
+         OI    XQEUXTF1,XQE@OUTX       set NOLIMIT indicator
+         B     USOSXIT                 exit
+*
+USOS030  DS    0H
+         ICM   R3,15,DSAEXTPR          SYSOUT lines extensions?
+         BZ    USOS040                 no
+         MVC   XQEOUTXL,DSAEXTPR       set max extensions allowed
+         NI    XQEUXTF1,XFF-XQE@OUTX   reset NOLIMIT indicator
+         B     USOSXIT                 exit
+*
+USOS040  DS    0H
+         MVC   XQEOUTXL,=F'1'          one extension allowed
+         NI    XQEUXTF1,XFF-XQE@OUTX   reset NOLIMIT indicator
+*
+USOSXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFUJP                                              */
+*/*                                                                  */
+*/* Exit:        IEFUJP                                              */
+*/*                                                                  */
+*/* Function:    PURGE= parse parameter subroutine                   */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFUJP   ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=F,LINKAGE=LOCAL     trace
+*
+**       Validity check keyword data
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         CLC   =CL2'NO',0(R3)          valid operand?
+         BE    UJPU010                 yes
+         CLC   =CL3'YES',0(R3)         valid operand?
+         BNE   UJPUERR                 no
+*
+**       Set PURGE=YES indicator
+*
+UJPU000  DS    0H
+         OI    XQEUXTF1,XQE@UJPR       purge SMF record
+         B     UJPU099                 exit
+*
+**       Set PURGE=NO indicator
+*
+UJPU010  DS    0H
+         NI    XQEUXTF1,XFF-XQE@UJPR   donot purge SMF record
+         B     UJPU099                 exit
+*
+**       Invalid operand data specified
+*
+UJPUERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         error
+         B     UJPUXIT                 exit
+*
+UJPU099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+UJPUXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        U29DUMP                                             */
+*/*                                                                  */
+*/* Exit:        IEFU29                                              */
+*/*                                                                  */
+*/* Function:    DUMPCMD= parse parameter subroutine                 */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+U29DUMP  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=F,LINKAGE=LOCAL     trace
+*
+**       Validity check dump command
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         LH    R2,KEYWDATL             keyword data length
+         CLI   0(R3),QUOTE             quoted string?
+         BNE   U29DERR                 no, error
+         LA    R3,1(,R3)               skip quote
+         CLI   0(R3),BLANK             valid dump command?
+         BE    U29DERR                 no, error
+         LR    R4,R3                   dymp command text address
+*
+U29D000  DS    0H
+         CLI   0(R3),QUOTE             end of dump command text?
+         BE    U29D010                 yes
+         LA    R3,1(,R3)               walk thru dump command text
+         BCT   R2,U29D000              loop
+         B     U29DERR                 error
+*
+U29D010  DS    0H
+         CLI   1(R3),COMMA             valid dump command text?
+         BE    U29D020                 yes
+         CLI   1(R3),CPAREN            valid dump command text?
+         BNE   U29DERR                 no, error
+*
+U29D020  DS    0H
+         SLR   R3,R4                   get dump command text length
+         STH   R3,XQE29CLN             copy command length
+         BCTR  R3,0
+         MVC   XQE29CMD,ZEVTBLKS       clear dump command buffer
+         EX    R3,CPY29CMD             copy dump command text
+         CLI   XQE29CMD,BLANK          valid command text
+         BE    U29DERR                 no
+*
+U29D030  DS    0H
+         OI    XQEUXTF1,XQE@DCMD       SMF dump command indicator
+         TM    XQEUXTF1,XQE@DMSG       mutually exclusive parm?
+         BZ    U29D099                 no
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN384)     RSN
+         ZWTO  MID=ZEMF38E,                                            +
+               V1=DSAMEMBR,V2==CL10'DUMPCMD',V3==CL10'DUMPMSG'
+         B     U29DXIT                 exit
+*
+**       Invalid command data specified
+*
+U29DERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN404)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         B     U29DXIT                 exit
+*
+U29D099  DS    0H
+         OI    XQECOMF1,XQE@U29X       IEFU29 exit indicator
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+U29DXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+CPY29CMD MVC   XQE29CMD(*-*),0(R4)     copy command text
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        U29MSGS                                             */
+*/*                                                                  */
+*/* Exit:        IEFU29                                              */
+*/*                                                                  */
+*/* Function:    DUMPMSG= parse parameter subroutine                 */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+U29MSGS  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=F,LINKAGE=LOCAL     trace
+*
+**       Validity check keyword data
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         CLC   =CL2'NO',0(R3)          valid operand?
+         BE    U29M010                 yes
+         CLC   =CL3'YES',0(R3)         valid operand?
+         BNE   U29MERR                 no
+*
+**       Set DUMPMSG=YES indicator
+*
+         OI    XQEUXTF1,XQE@DMSG       set issue SMF dump msg
+         TM    XQEUXTF1,XQE@DCMD       mutually exclusive parm?
+         BZ    U29M099                 no
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN384)     RSN
+         ZWTO  MID=ZEMF38E,                                            +
+               V1=DSAMEMBR,V2==CL10'DUMPMSG',V3==CL10'DUMPCMD'
+         B     U29MXIT                 exit
+*
+**       Set DUMPMSG=NO indicator
+*
+U29M010  DS    0H
+         NI    XQEUXTF1,XFF-XQE@DMSG   set donot issue SMF dump msg
+         B     U29M099                 exit
+*
+**       Invalid operand data specified
+*
+U29MERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         error
+         MVC   DSARSN,=AL4(RSN400)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         B     U29MXIT                 exit
+*
+U29M099  DS    0H
+         OI    XQECOMF1,XQE@U29X       IEFU29 exit indicator
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+U29MXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        U29LDMP                                             */
+*/*                                                                  */
+*/* Exit:        IEFU29L                                             */
+*/*                                                                  */
+*/* Function:    SMF log stream dump parse parameter subroutine      */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+U29LDMP  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=F,LINKAGE=LOCAL     trace
+*
+**       Validity check dump command
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         LH    R2,KEYWDATL             keyword data length
+         CLI   0(R3),QUOTE             quoted string?
+         BNE   U29LERR                 no, error
+         LA    R3,1(,R3)               skip quote
+         CLI   0(R3),BLANK             valid dump command?
+         BE    U29LERR                 no, error
+         LR    R4,R3                   dymp command text address
+*
+U29L000  DS    0H
+         CLI   0(R3),QUOTE             end of dump command text?
+         BE    U29L010                 yes
+         LA    R3,1(,R3)               walk thru dump command text
+         BCT   R2,U29L000              loop
+         B     U29LERR                 error
+*
+U29L010  DS    0H
+         CLI   1(R3),COMMA             valid dump command text?
+         BE    U29L020                 yes
+         CLI   1(R3),CPAREN            valid dump command text?
+         BNE   U29LERR                 no, error
+*
+U29L020  DS    0H
+         SLR   R3,R4                   get dump command text length
+         STH   R3,XQE29CLN             copy command length
+         BCTR  R3,0
+         MVC   XQE29CMD,ZEVTBLKS       clear dump command buffer
+         EX    R3,CPY29LCM             copy dump command text
+         CLI   XQE29CMD,BLANK          valid command text
+         BE    U29LERR                 no
+         OI    XQEUXTF1,XQE@DCMD       SMF dump command indicator
+         B     U29L099                 exit
+*
+**       Invalid command data specified
+*
+U29LERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN404)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         B     U29LXIT                 exit
+*
+U29L099  DS    0H
+         OI    XQECOMF1,XQE@29LX       IEFU29L exit indicator
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+U29LXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+CPY29LCM MVC   XQE29CMD(*-*),0(R4)     copy command text
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU83                                              */
+*/*                                                                  */
+*/* Exit:        IEFU83                                              */
+*/*                                                                  */
+*/* Function:    SMF record exit parse parameter subroutine          */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU83   ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE P83=A,LINKAGE=LOCAL     trace
+*
+**       Extract SMF record number
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         LH    R2,KEYWDATL             keyword data length
+         CLC   =CL2'NO',0(R3)          SUPPRESS=NO?
+         BNE   U83S000                 no
+         OI    XQEUXTF1,XQE@U8XW       DONOT suppress SMF record
+         ZTRCE P83=B,LINKAGE=LOCAL     trace
+         B     U83S999                 exit
+*
+U83S000  DS    0H
+         CLI   0(R3),BLANK             valid record list?
+         BE    U83SERR                 no, error
+         LR    R4,R3                   record list address
+         ZTRCE P83=C,LINKAGE=LOCAL     trace
+*
+U83S010  DS    0H
+         CLC   =CL2', ',0(R3)          end of record list?
+         BE    U83S020                 yes
+         CLC   =CL2') ',0(R3)          end of record list?
+         BE    U83S020                 yes
+         LA    R3,1(,R3)               walk thru record list
+         BCT   R2,U83S010              loop
+         ZTRCE P83=D,LINKAGE=LOCAL     trace
+         B     U83SERR                 error
+*
+U83S020  DS    0H
+         SLR   R3,R4                   get record list length
+         ST    R3,DSASMFLN             save record list length
+         BCTR  R3,0
+         MVC   DSAWORK,ZEVTBLKS        clear record list workarea
+         EX    R3,U83SRCPY             copy record list
+         CLI   DSAWORK,BLANK           valid record list?
+         BE    U83SERR                 no
+         ZTRCE P83=E,LINKAGE=LOCAL     trace
+*
+**       Convert SMF records to binary
+*
+U83S100  DS    0H
+         LA    R3,DSAWORK              workarea address
+         LR    R4,R3                   copy address
+         LA    R2,DSAWORSZ             workarea length
+         LA    R1,XQE8XSMF             record list address
+         ST    R1,DSASMFNR             save starting address
+         ZTRCE P83=F,LINKAGE=LOCAL     trace
+*
+U83S110  DS    0H
+         CLI   0(R3),COMMA             end of record?
+         BE    U83S120                 yes
+         CLI   0(R3),BLANK             end of record list?
+         BE    U83S120                 yes
+         LA    R3,1(,R3)               walk thru record
+         BCT   R2,U83S110              loop
+         ZTRCE P83=G,LINKAGE=LOCAL     trace
+*
+U83S120  DS    0H
+         ST    R2,DSASMFLV             save remining loop value
+         ST    R3,DSASMFAD             save next record address
+         SLR   R3,R4                   record length
+         CH    R3,=H'4'                valid?
+         BH    U83SERR                 no, error
+         MVC   DSAPDATA,ZEVTZONE       move zones
+         LA    R1,DSA@PEND             end of record field
+         SLR   R1,R3                   subtract record length
+         BCTR  R3,0
+         EX    R3,U83SCOPY             copy zoned SMF record
+         MVC   DSADWRD,DSAPDATA        move SMF record
+         MVN   DSADWRD,DSAPDATA        move SMF record numerics
+         CLC   DSADWRD,DSAPDATA        valid SMF record?
+         BNE   U83SERR                 no, error
+         PACK  DSADWRD,DSAPDATA        pack SMF record
+         CVB   R3,DSADWRD              convert to binary
+         CH    R3,=AL2(2047)           valid record number?
+         BH    U83SERR                 no, error
+         ST    R3,DSASMFRC             init binary record
+         ZTRCE P83=H,LINKAGE=LOCAL     trace
+*
+**       Add binary SMF record to list
+*
+         L     R1,DSASMFCT             get SMF record count
+         CH    R1,=AL2(XQE@8XCZ)       records overflow?
+         BH    U83SERR                 yes, error
+         L     R2,DSASMFNR             record-list address
+         STH   R3,0(R2)                init binary record number
+         LA    R2,2(,R2)               next record slot
+         ST    R2,DSASMFNR             next record-list address
+         L     R1,DSASMFCT             get SMF record count
+         LA    R1,1(,R1)               add one
+         ST    R1,DSASMFCT             update count
+         STH   R1,XQE8XCNT             update ZXQE count
+         ZTRCE P83=I,LINKAGE=LOCAL     trace
+*
+**       Extract next SMF record number
+*
+         L     R2,DSASMFLV             get remaining loop value
+         L     R3,DSASMFAD             get next record address
+         CLI   0(R3),BLANK             all records converted?
+         BE    U83S130                 yes
+         CLI   0(R3),COMMA             more records?
+         BNE   U83SERR                 no, error
+         LA    R3,1(,R3)               point to next record
+         LR    R4,R3                   copy next record address
+         ZTRCE P83=J,LINKAGE=LOCAL     trace
+         B     U83S110                 loop
+*
+U83S130  DS    0H
+         NI    XQEUXTF1,XFF-XQE@U8XW   suppress SMF record
+         ZTRCE P83=K,LINKAGE=LOCAL     trace
+         B     U83S999                 exit
+*
+**       Invalid SMF record(s) specified
+*
+U83SERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN412)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         ZTRCE P83=L,LINKAGE=LOCAL     trace
+         B     U83SXIT                 exit
+*
+U83S999  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE P83=M,LINKAGE=LOCAL     trace
+*
+U83SXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+U83SCOPY MVC   0(*-*,R1),0(R4)
+U83SRCPY MVC   DSAWORK(*-*),0(R4)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU84                                              */
+*/*                                                                  */
+*/* Exit:        IEFU84                                              */
+*/*                                                                  */
+*/* Function:    SMF record exit parse parameter subroutine          */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU84   ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE P84=A,LINKAGE=LOCAL     trace
+*
+**       Extract SMF record number
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         LH    R2,KEYWDATL             keyword data length
+         CLC   =CL2'NO',0(R3)          SUPPRESS=NO?
+         BNE   U84S000                 no
+         OI    XQEUXTF1,XQE@U8XW       DONOT suppress SMF record
+         ZTRCE P84=B,LINKAGE=LOCAL     trace
+         B     U84S999                 exit
+*
+U84S000  DS    0H
+         CLI   0(R3),BLANK             valid record list?
+         BE    U84SERR                 no, error
+         LR    R4,R3                   record list address
+         ZTRCE P84=C,LINKAGE=LOCAL     trace
+*
+U84S010  DS    0H
+         CLC   =CL2', ',0(R3)          end of record list?
+         BE    U84S020                 yes
+         CLC   =CL2') ',0(R3)          end of record list?
+         BE    U84S020                 yes
+         LA    R3,1(,R3)               walk thru record list
+         BCT   R2,U84S010              loop
+         ZTRCE P84=D,LINKAGE=LOCAL     trace
+         B     U84SERR                 error
+*
+U84S020  DS    0H
+         SLR   R3,R4                   get record list length
+         ST    R3,DSASMFLN             save record list length
+         BCTR  R3,0
+         MVC   DSAWORK,ZEVTBLKS        clear record list workarea
+         EX    R3,U84SRCPY             copy record list
+         CLI   DSAWORK,BLANK           valid record list?
+         BE    U84SERR                 no
+         ZTRCE P84=E,LINKAGE=LOCAL     trace
+*
+**       Convert SMF records to binary
+*
+U84S100  DS    0H
+         LA    R3,DSAWORK              workarea address
+         LR    R4,R3                   copy address
+         LA    R2,DSAWORSZ             workarea length
+         LA    R1,XQE8XSMF             record list address
+         ST    R1,DSASMFNR             save starting address
+         ZTRCE P84=F,LINKAGE=LOCAL     trace
+*
+U84S110  DS    0H
+         CLI   0(R3),COMMA             end of record?
+         BE    U84S120                 yes
+         CLI   0(R3),BLANK             end of record list?
+         BE    U84S120                 yes
+         LA    R3,1(,R3)               walk thru record
+         BCT   R2,U84S110              loop
+         ZTRCE P84=G,LINKAGE=LOCAL     trace
+*
+U84S120  DS    0H
+         ST    R2,DSASMFLV             save remining loop value
+         ST    R3,DSASMFAD             save next record address
+         SLR   R3,R4                   record length
+         CH    R3,=H'4'                valid?
+         BH    U84SERR                 no, error
+         MVC   DSAPDATA,ZEVTZONE       move zones
+         LA    R1,DSA@PEND             end of record field
+         SLR   R1,R3                   subtract record length
+         BCTR  R3,0
+         EX    R3,U84SCOPY             copy zoned SMF record
+         MVC   DSADWRD,DSAPDATA        move SMF record
+         MVN   DSADWRD,DSAPDATA        move SMF record numerics
+         CLC   DSADWRD,DSAPDATA        valid SMF record?
+         BNE   U84SERR                 no, error
+         PACK  DSADWRD,DSAPDATA        pack SMF record
+         CVB   R3,DSADWRD              convert to binary
+         CH    R3,=AL2(2047)           valid record number?
+         BH    U84SERR                 no, error
+         ST    R3,DSASMFRC             init binary record
+         ZTRCE P84=H,LINKAGE=LOCAL     trace
+*
+**       Add binary SMF record to list
+*
+         L     R1,DSASMFCT             get SMF record count
+         CH    R1,=AL2(XQE@8XCZ)       records overflow?
+         BH    U84SERR                 yes, error
+         L     R2,DSASMFNR             record-list address
+         STH   R3,0(R2)                init binary record number
+         LA    R2,2(,R2)               next record slot
+         ST    R2,DSASMFNR             next record-list address
+         L     R1,DSASMFCT             get SMF record count
+         LA    R1,1(,R1)               add one
+         ST    R1,DSASMFCT             update count
+         STH   R1,XQE8XCNT             update ZXQE count
+         ZTRCE P84=I,LINKAGE=LOCAL     trace
+*
+**       Extract next SMF record number
+*
+         L     R2,DSASMFLV             get remaining loop value
+         L     R3,DSASMFAD             get next record address
+         CLI   0(R3),BLANK             all records converted?
+         BE    U84S130                 yes
+         CLI   0(R3),COMMA             more records?
+         BNE   U84SERR                 no, error
+         LA    R3,1(,R3)               point to next record
+         LR    R4,R3                   copy next record address
+         ZTRCE P84=J,LINKAGE=LOCAL     trace
+         B     U84S110                 loop
+*
+U84S130  DS    0H
+         NI    XQEUXTF1,XFF-XQE@U8XW   suppress SMF record
+         ZTRCE P84=K,LINKAGE=LOCAL     trace
+         B     U84S999                 exit
+*
+**       Invalid SMF record(s) specified
+*
+U84SERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN412)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         ZTRCE P84=L,LINKAGE=LOCAL     trace
+         B     U84SXIT                 exit
+*
+U84S999  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE P84=M,LINKAGE=LOCAL     trace
+*
+U84SXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+U84SCOPY MVC   0(*-*,R1),0(R4)
+U84SRCPY MVC   DSAWORK(*-*),0(R4)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU85                                              */
+*/*                                                                  */
+*/* Exit:        IEFU85                                              */
+*/*                                                                  */
+*/* Function:    SMF record exit parse parameter subroutine          */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU85   ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE P85=A,LINKAGE=LOCAL     trace
+*
+**       Extract SMF record number
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         LH    R2,KEYWDATL             keyword data length
+         CLC   =CL2'NO',0(R3)          SUPPRESS=NO?
+         BNE   U85S000                 no
+         OI    XQEUXTF1,XQE@U8XW       DONOT suppress SMF record
+         ZTRCE P85=B,LINKAGE=LOCAL     trace
+         B     U85S999                 exit
+*
+U85S000  DS    0H
+         CLI   0(R3),BLANK             valid record list?
+         BE    U85SERR                 no, error
+         LR    R4,R3                   record list address
+         ZTRCE P85=C,LINKAGE=LOCAL     trace
+*
+U85S010  DS    0H
+         CLC   =CL2', ',0(R3)          end of record list?
+         BE    U85S020                 yes
+         CLC   =CL2') ',0(R3)          end of record list?
+         BE    U85S020                 yes
+         LA    R3,1(,R3)               walk thru record list
+         BCT   R2,U85S010              loop
+         ZTRCE P85=D,LINKAGE=LOCAL     trace
+         B     U85SERR                 error
+*
+U85S020  DS    0H
+         SLR   R3,R4                   get record list length
+         ST    R3,DSASMFLN             save record list length
+         BCTR  R3,0
+         MVC   DSAWORK,ZEVTBLKS        clear record list workarea
+         EX    R3,U85SRCPY             copy record list
+         CLI   DSAWORK,BLANK           valid record list?
+         BE    U85SERR                 no
+         ZTRCE P85=E,LINKAGE=LOCAL     trace
+*
+**       Convert SMF records to binary
+*
+U85S100  DS    0H
+         LA    R3,DSAWORK              workarea address
+         LR    R4,R3                   copy address
+         LA    R2,DSAWORSZ             workarea length
+         LA    R1,XQE8XSMF             record list address
+         ST    R1,DSASMFNR             save starting address
+         ZTRCE P85=F,LINKAGE=LOCAL     trace
+*
+U85S110  DS    0H
+         CLI   0(R3),COMMA             end of record?
+         BE    U85S120                 yes
+         CLI   0(R3),BLANK             end of record list?
+         BE    U85S120                 yes
+         LA    R3,1(,R3)               walk thru record
+         BCT   R2,U85S110              loop
+         ZTRCE P85=G,LINKAGE=LOCAL     trace
+*
+U85S120  DS    0H
+         ST    R2,DSASMFLV             save remining loop value
+         ST    R3,DSASMFAD             save next record address
+         SLR   R3,R4                   record length
+         CH    R3,=H'4'                valid?
+         BH    U85SERR                 no, error
+         MVC   DSAPDATA,ZEVTZONE       move zones
+         LA    R1,DSA@PEND             end of record field
+         SLR   R1,R3                   subtract record length
+         BCTR  R3,0
+         EX    R3,U85SCOPY             copy zoned SMF record
+         MVC   DSADWRD,DSAPDATA        move SMF record
+         MVN   DSADWRD,DSAPDATA        move SMF record numerics
+         CLC   DSADWRD,DSAPDATA        valid SMF record?
+         BNE   U85SERR                 no, error
+         PACK  DSADWRD,DSAPDATA        pack SMF record
+         CVB   R3,DSADWRD              convert to binary
+         CH    R3,=AL2(2047)           valid record number?
+         BH    U85SERR                 no, error
+         ST    R3,DSASMFRC             init binary record
+         ZTRCE P85=H,LINKAGE=LOCAL     trace
+*
+**       Add binary SMF record to list
+*
+         L     R1,DSASMFCT             get SMF record count
+         CH    R1,=AL2(XQE@8XCZ)       records overflow?
+         BH    U85SERR                 yes, error
+         L     R2,DSASMFNR             record-list address
+         STH   R3,0(R2)                init binary record number
+         LA    R2,2(,R2)               next record slot
+         ST    R2,DSASMFNR             next record-list address
+         L     R1,DSASMFCT             get SMF record count
+         LA    R1,1(,R1)               add one
+         ST    R1,DSASMFCT             update count
+         STH   R1,XQE8XCNT             update ZXQE count
+         ZTRCE P85=I,LINKAGE=LOCAL     trace
+*
+**       Extract next SMF record number
+*
+         L     R2,DSASMFLV             get remaining loop value
+         L     R3,DSASMFAD             get next record address
+         CLI   0(R3),BLANK             all records converted?
+         BE    U85S130                 yes
+         CLI   0(R3),COMMA             more records?
+         BNE   U85SERR                 no, error
+         LA    R3,1(,R3)               point to next record
+         LR    R4,R3                   copy next record address
+         ZTRCE P85=J,LINKAGE=LOCAL     trace
+         B     U85S110                 loop
+*
+U85S130  DS    0H
+         NI    XQEUXTF1,XFF-XQE@U8XW   suppress SMF record
+         ZTRCE P85=K,LINKAGE=LOCAL     trace
+         B     U85S999                 exit
+*
+**       Invalid SMF record(s) specified
+*
+U85SERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN412)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         ZTRCE P85=L,LINKAGE=LOCAL     trace
+         B     U85SXIT                 exit
+*
+U85S999  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE P85=M,LINKAGE=LOCAL     trace
+*
+U85SXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+U85SCOPY MVC   0(*-*,R1),0(R4)
+U85SRCPY MVC   DSAWORK(*-*),0(R4)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU86                                              */
+*/*                                                                  */
+*/* Exit:        IEFU86                                              */
+*/*                                                                  */
+*/* Function:    SMF record exit parse parameter subroutine          */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU86   ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE P86=A,LINKAGE=LOCAL     trace
+*
+**       Extract SMF record number
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         LH    R2,KEYWDATL             keyword data length
+         CLC   =CL2'NO',0(R3)          SUPPRESS=NO?
+         BNE   U86S000                 no
+         OI    XQEUXTF1,XQE@U8XW       DONOT suppress SMF record
+         ZTRCE P86=B,LINKAGE=LOCAL     trace
+         B     U86S999                 exit
+*
+U86S000  DS    0H
+         CLI   0(R3),BLANK             valid record list?
+         BE    U86SERR                 no, error
+         LR    R4,R3                   record list address
+         ZTRCE P86=C,LINKAGE=LOCAL     trace
+*
+U86S010  DS    0H
+         CLC   =CL2', ',0(R3)          end of record list?
+         BE    U86S020                 yes
+         CLC   =CL2') ',0(R3)          end of record list?
+         BE    U86S020                 yes
+         LA    R3,1(,R3)               walk thru record list
+         BCT   R2,U86S010              loop
+         ZTRCE P86=D,LINKAGE=LOCAL     trace
+         B     U86SERR                 error
+*
+U86S020  DS    0H
+         SLR   R3,R4                   get record list length
+         ST    R3,DSASMFLN             save record list length
+         BCTR  R3,0
+         MVC   DSAWORK,ZEVTBLKS        clear record list workarea
+         EX    R3,U86SRCPY             copy record list
+         CLI   DSAWORK,BLANK           valid record list?
+         BE    U86SERR                 no
+         ZTRCE P86=E,LINKAGE=LOCAL     trace
+*
+**       Convert SMF records to binary
+*
+U86S100  DS    0H
+         LA    R3,DSAWORK              workarea address
+         LR    R4,R3                   copy address
+         LA    R2,DSAWORSZ             workarea length
+         LA    R1,XQE8XSMF             record list address
+         ST    R1,DSASMFNR             save starting address
+         ZTRCE P86=F,LINKAGE=LOCAL     trace
+*
+U86S110  DS    0H
+         CLI   0(R3),COMMA             end of record?
+         BE    U86S120                 yes
+         CLI   0(R3),BLANK             end of record list?
+         BE    U86S120                 yes
+         LA    R3,1(,R3)               walk thru record
+         BCT   R2,U86S110              loop
+         ZTRCE P86=G,LINKAGE=LOCAL     trace
+*
+U86S120  DS    0H
+         ST    R2,DSASMFLV             save remining loop value
+         ST    R3,DSASMFAD             save next record address
+         SLR   R3,R4                   record length
+         CH    R3,=H'4'                valid?
+         BH    U86SERR                 no, error
+         MVC   DSAPDATA,ZEVTZONE       move zones
+         LA    R1,DSA@PEND             end of record field
+         SLR   R1,R3                   subtract record length
+         BCTR  R3,0
+         EX    R3,U86SCOPY             copy zoned SMF record
+         MVC   DSADWRD,DSAPDATA        move SMF record
+         MVN   DSADWRD,DSAPDATA        move SMF record numerics
+         CLC   DSADWRD,DSAPDATA        valid SMF record?
+         BNE   U86SERR                 no, error
+         PACK  DSADWRD,DSAPDATA        pack SMF record
+         CVB   R3,DSADWRD              convert to binary
+         CH    R3,=AL2(2047)           valid record number?
+         BH    U86SERR                 no, error
+         ST    R3,DSASMFRC             init binary record
+         ZTRCE P86=H,LINKAGE=LOCAL     trace
+*
+**       Add binary SMF record to list
+*
+         L     R1,DSASMFCT             get SMF record count
+         CH    R1,=AL2(XQE@8XCZ)       records overflow?
+         BH    U86SERR                 yes, error
+         L     R2,DSASMFNR             record-list address
+         STH   R3,0(R2)                init binary record number
+         LA    R2,2(,R2)               next record slot
+         ST    R2,DSASMFNR             next record-list address
+         L     R1,DSASMFCT             get SMF record count
+         LA    R1,1(,R1)               add one
+         ST    R1,DSASMFCT             update count
+         STH   R1,XQE8XCNT             update ZXQE count
+         ZTRCE P86=I,LINKAGE=LOCAL     trace
+*
+**       Extract next SMF record number
+*
+         L     R2,DSASMFLV             get remaining loop value
+         L     R3,DSASMFAD             get next record address
+         CLI   0(R3),BLANK             all records converted?
+         BE    U86S130                 yes
+         CLI   0(R3),COMMA             more records?
+         BNE   U86SERR                 no, error
+         LA    R3,1(,R3)               point to next record
+         LR    R4,R3                   copy next record address
+         ZTRCE P86=J,LINKAGE=LOCAL     trace
+         B     U86S110                 loop
+*
+U86S130  DS    0H
+         NI    XQEUXTF1,XFF-XQE@U8XW   suppress SMF record
+         ZTRCE P86=K,LINKAGE=LOCAL     trace
+         B     U86S999                 exit
+*
+**       Invalid SMF record(s) specified
+*
+U86SERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN412)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         ZTRCE P86=L,LINKAGE=LOCAL     trace
+         B     U86SXIT                 exit
+*
+U86S999  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE P86=M,LINKAGE=LOCAL     trace
+*
+U86SXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+U86SCOPY MVC   0(*-*,R1),0(R4)
+U86SRCPY MVC   DSAWORK(*-*),0(R4)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        KEYWPAR                                             */
+*/*                                                                  */
+*/* Function:    Keyword parser nested subroutine                    */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+KEYWPAR  ZMACS GEN=SUBENTY,SUBSAVE=DSANSSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING XSA,R8
+         USING ZEVT,R11
+         MVC   DSANOLIM,ZEVTBLKS       clear NOLIMIT increment
+         MVC   DSAEXTLM,ZEVTBLKS       clear NOLIMIT extension
+         ZTRCE PAR=L,LINKAGE=LOCAL     trace
+*
+**       Initialize increment data value
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          set error data
+         LH    R1,KEYWORDL             keyword name length
+         LA    R3,0(R1,R4)             keyword data address
+         CLC   ZEVTNLMT,0(R3)          NOLIMIT?
+         BNE   KEYW000                 no
+         MVC   DSANOLIM,ZEVTNLMT       set NOLIMIT
+         XC    DSAKEYPR,DSAKEYPR       zero increment value
+         XC    DSAEXTPR,DSAEXTPR       zero extension value
+         B     KEYW070
+*
+KEYW000  DS    0H
+         LR    R2,R3                   copy keyword data address
+         LH    R1,KEYWDATL             keyword data length
+         LA    R1,1(,R1)               add one
+*
+KEYW010  DS    0H
+         CLI   0(R3),COMMA             end of keyword data
+         BE    KEYW020                 yes
+         CLI   0(R3),CPAREN            end of keyword data
+         BE    KEYW020                 yes
+         LA    R3,1(,R3)               walk thru keyword data
+         BCT   R1,KEYW010              loop
+         B     KEYWERR                 error
+*
+KEYW020  DS    0H
+         LR    R4,R3                   copy separator address
+         SLR   R3,R2                   get keyword data length
+         CH    R3,KEYWDATL             valid keyword data?
+         BH    KEYWERR                 no, error
+         L     R15,DSAZPARE            ZPAR keyword address
+         CLC   =CL12'WAITTIME=JWT',0(R15)  JWT specified?
+         BNE   KEYW030                 no
+         MVC   DSAKEYPR,DSAJWTS        init JWT() binary seconds
+         B     KEYW040                 carry on
+*
+KEYW030  DS    0H
+         MVC   DSAPDATA,ZEVTZONE       move zones
+         LA    R1,DSA@PEND             end of parmdata field
+         SLR   R1,R3                   subtract parmdata length
+         BCTR  R3,0
+         EX    R3,KEYWDATA             copy data
+         MVC   DSADWRD,DSAPDATA        move parmdata
+         MVN   DSADWRD,DSAPDATA        move numerics
+         CLC   DSADWRD,DSAPDATA        valid parmdata?
+         BNE   KEYWERR                 no, error
+         PACK  DSADWRD,DSAPDATA        pack parmdata
+         CVB   R3,DSADWRD              convert to binary
+         ST    R3,DSAKEYPR             init binary value
+*
+**       Convert value to timer units
+*
+         TM    DSAFLG1,DSA@TUNI        convert to timer units?
+         BZ    KEYW040                 no
+         XR    R2,R2
+         L     R3,TUVALUE              one timer unit
+         L     R0,DSAKEYPR             number of timer units
+         MR    R2,R0                   total timer units
+         ST    R3,DSAKEYPR             save total
+*
+**       Initialize extension data value
+*
+KEYW040  DS    0H
+         CLI   0(R4),CPAREN            end of keyword data?
+         BE    KEYW099                 yes
+         LA    R4,1(,R4)               skip separator
+         CLI   0(R4),FOXZERO           numeric value?
+         BL    KEYW070                 no
+         CLI   0(R4),FOXNINE           numeric value?
+         BH    KEYW070                 no
+         LR    R3,R4                   extension address
+         LA    R1,4                    extension loop
+*
+KEYW050  DS    0H
+         CLI   0(R3),COMMA             end of extension data
+         BE    KEYW060                 yes
+         CLI   0(R3),CPAREN            end of extension data
+         BE    KEYW060                 yes
+         LA    R3,1(,R3)               walk thru keyword data
+         BCT   R1,KEYW050              loop
+         B     KEYWERR                 error
+*
+KEYW060  DS    0H
+         SLR   R3,R4                   extension data length
+         CH    R3,=H'3'                valid?
+         BH    KEYWERR                 no, error
+         MVC   DSAPDATA,ZEVTZONE       move zones
+         LA    R1,DSA@PEND             end of parmdata field
+         SLR   R1,R3                   subtract parmdata length
+         BCTR  R3,0
+         EX    R3,KEYWEXTS             copy extension value
+         MVC   DSADWRD,DSAPDATA        move parmdata
+         MVN   DSADWRD,DSAPDATA        move numerics
+         CLC   DSADWRD,DSAPDATA        valid parmdata?
+         BNE   KEYWERR                 no, error
+         PACK  DSADWRD,DSAPDATA        pack parmdata
+         CVB   R3,DSADWRD              convert to binary
+         ST    R3,DSAEXTPR             init binary value
+         B     KEYW099
+*
+KEYW070  DS    0H
+         CLC   ZEVTNLMT,0(R4)          NOLIMIT?
+         BNE   KEYW099                 no
+         MVC   DSAEXTLM,ZEVTNLMT       set NOLIMIT
+         XC    DSAEXTPR,DSAEXTPR       zero extension value
+         B     KEYW099
+*
+**       Invalid keyword parameter data
+*
+KEYWERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         initial RC
+         MVC   DSARSN,=AL4(RSN416)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         B     KEYWXIT                 exit
+*
+KEYW099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+KEYWXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+KEYWDATA MVC   0(*-*,R1),0(R2)
+KEYWEXTS MVC   0(*-*,R1),0(R4)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+TUVALUE  DC    F'&ZTIMERU'             timer unit value
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        WARNWTO                                             */
+*/*                                                                  */
+*/* Exit:        All system exits                                    */
+*/*                                                                  */
+*/* Function:    WARNWTO= parse parameter subroutine                 */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+WARNWTO  ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=K,LINKAGE=LOCAL     trace
+*
+**       Validity check keyword data
+*
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         CLC   =CL2'NO',0(R3)          valid operand?
+         BE    WARN010                 yes
+         CLC   =CL3'YES',0(R3)         valid operand?
+         BNE   WARNERR                 no
+*
+**       Set WARNWTO=YES indicator
+*
+WARN000  DS    0H
+         OI    XQECOMF1,XQE@WARN       set issue warning WTO
+         B     WARN099                 exit
+*
+**       Set WARNWTO=NO indicator
+*
+WARN010  DS    0H
+         NI    XQECOMF1,XFF-XQE@WARN   set donot issue warning WTO
+         B     WARN099                 exit
+*
+**       Invalid operand data specified
+*
+WARNERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         error
+         MVC   DSARSN,=AL4(RSN392)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         B     WARNXIT                 exit
+*
+WARN099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+WARNXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        OPTSMF                                              */
+*/*                                                                  */
+*/* Exit:        All system exits                                    */
+*/*                                                                  */
+*/* Function:    SMF= parse parameter subroutine                     */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+OPTSMF   ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=K,LINKAGE=LOCAL     trace
+*
+**       Validity check SMF recording restrictions
+*
+         L     R4,DSAKEYWA             exit name table entry
+XKEYW    USING KEYW,R4
+         CLI   XKEYW.KEYWSMF,C'Y'      SMF=Y?
+         BE    OPTS010                 yes
+         ZWTO  MID=ZEMF37W,V1==CL8'SMF=YES',V2=XQEXNAME
+         B     OPTS099                 exit
+         DROP  XKEYW
+*
+**       Validity check keyword data
+*
+OPTS010  DS    0H
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         CLC   =CL2'NO',0(R3)          SMF=NO?
+         BNE   OPTS020                 No
+*
+**       Set SMF=NO indicator
+*
+         NI    XQECOMF1,XFF-XQE@SMFR   set SMF=NO indicator
+         B     OPTS099                 exit
+*
+**       Set SMF=nnn record type
+*
+OPTS020  DS    0H
+         MVC   DSASMFN,0(R3)           copy record type
+         CLC   DSASMFN,SMF200          valid?
+         BL    OPTSERR                 no
+         CLC   DSASMFN,SMF255          valid?
+         BH    OPTSERR                 no
+         MVC   DSADWRD,NUMERICS        move zones
+         MVN   DSADWRD(3),DSASMFN      move numerics
+         CLC   DSADWRD(3),DSASMFN      valid SMF?
+         BNE   OPTSERR                 no
+         PACK  DSADWRD,DSASMFN         pack SMF number
+         CVB   R1,DSADWRD              convert to binary
+         STC   R1,XQESMFTP             init binary SMF type
+         MVC   XQESMFNM,DSASMFN        init decimal SMF type
+         OI    XQECOMF1,XQE@SMFR       SMF recording requested
+         B     OPTS099                 exit
+*
+**       Invalid operand data specified
+*
+OPTSERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         error
+         MVC   DSARSN,=AL4(RSN396)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         B     OPTSXIT                 exit
+*
+OPTS099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+OPTSXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+SMF200   DC    CL3'200'
+SMF255   DC    CL3'255'
+NUMERICS DC    CL8'00000000'
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        OPTCMD                                              */
+*/*                                                                  */
+*/* Exit:        All system exits                                    */
+*/*                                                                  */
+*/* Function:    COMMAND= parse parameter subroutine                 */
+*/*                                                                  */
+*/* Input Regs:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  KEYW address                                    */
+*/*              R6  ZPAR address                                    */
+*/*              R7  ZXQE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+OPTCMD   ZMACS GEN=SUBENTY,SUBSAVE=DSASBSA
+         USING KEYW,R5
+         USING ZPAR,R6
+         USING ZXQE,R7
+         USING XSA,R8
+         USING ZEVT,R11
+         ZTRCE PAR=K,LINKAGE=LOCAL     trace
+*
+**       Validity check command restrictions
+*
+         L     R4,DSAKEYWA             exit name table entry
+XKEYW    USING KEYW,R4
+         CLI   XKEYW.KEYWCMD,C'Y'      COMMAND=Y?
+         BE    OPTC010                 yes
+         ZWTO  MID=ZEMF37W,V1==CL8'COMMAND=',V2=XQEXNAME
+         B     OPTC099                 exit
+         DROP  XKEYW
+*
+**       Validity check command data
+*
+OPTC010  DS    0H
+         L     R4,DSAZPARE             ZPAR keyword address
+         MVC   DSAKDATA,0(R4)          error data
+         LH    R2,KEYWORDL             keyword name length
+         LA    R3,0(R2,R4)             keyword data address
+         LH    R2,KEYWDATL             keyword data length
+         CLI   0(R3),QUOTE             quoted string?
+         BNE   OPTCERR                 no, error
+         LA    R3,1(,R3)               skip quote
+         CLI   0(R3),BLANK             valid command?
+         BE    OPTCERR                 no, error
+         LR    R4,R3                   copy command text address
+*
+OPTC020  DS    0H
+         CLI   0(R3),QUOTE             end of command text?
+         BE    OPTC030                 yes
+         LA    R3,1(,R3)               walk thru command text
+         BCT   R2,OPTC020              loop
+         B     OPTCERR                 error
+*
+OPTC030  DS    0H
+         CLI   1(R3),COMMA             valid command text?
+         BE    OPTC040                 yes
+         CLI   1(R3),CPAREN            valid command text?
+         BNE   OPTCERR                 no, error
+*
+OPTC040  DS    0H
+         SLR   R3,R4                   get command text length
+         STH   R3,XQECOMLN             copy command length
+         BCTR  R3,0
+         MVC   XQECOMND,ZEVTBLKS       clear command buffer
+         EX    R3,COPYCMD              copy command text
+         CLI   XQECOMND,BLANK          valid command text?
+         BE    OPTCERR                 no
+         OI    XQECOMF1,XQE@CMND       command indicator
+         B     OPTC099                 exit
+*
+**       Invalid command data specified
+*
+OPTCERR  DS    0H
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN388)     RSN
+         ZWTO  MID=ZEMF37E,V1=DSAMEMBR,V2=DSAKDATA
+         B     OPTCXIT                 exit
+*
+OPTC099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+OPTCXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYCMD  MVC   XQECOMND(*-*),0(R4)     copy command text
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        Dynamic Storage Area                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+DSA      DSECT ,
+DSASAVE  DS    18F                     mainline savearea
+DSASBSA  DS    18F                     routine savearea
+DSANSSA  DS    18F                     nested subroutine savearea
+         DS    0X
+DSAFLG1  DS    XL1                     flags
+DSA@STAE EQU   X'80'                   recovery indicator
+DSA@JGEN EQU   X'40'                   generic jobname indicator
+DSA@KEYF EQU   X'20'                   keyword found indicator
+DSA@TUNI EQU   X'10'                   timer units indicator
+DSA@JCPU EQU   X'08'                   JOBCPU specified indicator
+DSA@SCPU EQU   X'04'                   STEPCPU specified idicator
+DSA@JTUS EQU   X'02'                   TUJBCPU specified indicator
+DSA@STUS EQU   X'01'                   TUSTPCPU specified indicator
+         DS    0X
+DSAFLG2  DS    XL1                     flags
+DSA@EXTR EQU   X'80'                   ZEXT required indicator
+DSA@2RV1 EQU   X'40'                   -available
+DSA@2RV2 EQU   X'20'                   -available
+DSA@2RV3 EQU   X'10'                   -available
+DSA@2RV4 EQU   X'08'                   -available
+DSA@2RV5 EQU   X'04'                   -available
+DSA@2RV6 EQU   X'02'                   -available
+DSA@2RV7 EQU   X'01'                   -available
+         DS    0X
+DSASTATE DS    XL1                     dynamic exit position
+DSAPOSIT DS    XL1                     dynamic exit position
+         DS    0F
+DSAKEYWA DS    A                       KEYW exit address
+DSAZPARE DS    A                       ZPAR keyword address
+DSAOFFST DS    F                       staging queue offset
+DSAKEYPR DS    F                       binary workarea
+DSAEXTPR DS    F                       binary workarea
+DSASMFRC DS    F                       binary SMF record
+DSASMFAD DS    F                       next SMF address savearwa
+DSASMFLV DS    F                       Loop value savearea
+DSASMFCT DS    F                       binary SMF records count
+DSASMFNR DS    F                       next record list location
+DSASMFLN DS    F                       SMF record list length
+DSAJWTS  DS    F                       JWT() binary seconds
+DSAWORD  DS    F                       conversion workarea
+         DS    0F
+DSAOPAR  DS    0XL12                   output GPRs
+DSARC    DS    F                       -R15
+DSARSN   DS    F                       -R0
+DSAOGR1  DS    F                       -R1
+DSA@OPRL EQU   *-DSAOPAR               keep order
+         DS    0D
+DSADWRD  DS    D                       workarea
+DSADWRD2 DS    D                       workarea
+DSAJOBNM DS    CL8                     jobname
+DSAJOBSV DS    CL8                     jobname savearea
+DSAMEMBR DS    CL8                     member name
+DSANOLIM DS    CL7                     NOLIMIT operand keyword
+DSAEXTLM DS    CL7                     NOLIMIT operand keyword
+DSADYNAM DS    CL16                    dynamic exit name
+DSAKDATA DS    CL16                    error data
+DSAZDATA DS    CL16                    error data
+         DS    0C
+DSAPDATA DS    CL8                     parmdata workarea
+DSA@PEND EQU   *                       -end of parmdata
+DSA@PDTZ EQU   *-DSAPDATA              keep order
+         DS    0C
+DSASJWT  DS    CL4                     SMFPRMxx JWT(hhmm)
+DSAVAR   DS    CL8                     variable data
+DSASMFN  DS    CL3                     SMF=nnn record number
+DSAVARX  DS    CL1                     slack byte
+DSA@VARZ EQU   *-DSAVAR                keep it order
+         DS    0D
+DSAWORK  DS    CL256                   general workarea
+DSAWORSZ EQU   *-DSAWORK               workarea length
+         DS    0D
+DSAPLST  DS    XL256                   general parmlist
+DSA@PLSZ EQU   *-DSAPLST               keep order
+         DS    0D
+DSA@SIZE EQU   *-DSA                   size of DSA
+*---------------------------------------------------------------------*
+*        Subsystem Server Data Areas                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+         ZTABS GEN=KEY,DSECT=YES
+         ZMACS GEN=MID,ID=XID,DSECT=YES
+         ZEVT  DSECT=YES,LIST=YES
+         END ,

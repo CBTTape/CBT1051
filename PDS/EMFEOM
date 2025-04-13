@@ -1,0 +1,405 @@
+EMFEOM   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        EMFEOM                                              */
+*/*                                                                  */
+*/* Function:    ZEMF Subsystem server End-of-Memory listener        */
+*/*                                                                  */
+*/* Description: Receives control from MVS MEMTERM when an address   */
+*/*              space normally or abnormally terminates.            */
+*/*                                                                  */
+*/* Input Regs:  R0  SSCT address                                    */
+*/*              R1  SSOB address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R6  SSEN address                                    */
+*/*              R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Key 0                                               */
+*/*              Supervisor state                                    */
+*/*              Page fixed                                          */
+*/*              Write protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+EMFEOM   AMODE 31
+EMFEOM   RMODE ANY
+         COPY  ZGBLS
+         USING EMFEOM,R15              Entry
+         STM   R14,R12,GPR@R14(R13)    caller regs
+         B     EOM0000                 branch
+         ZMACS GEN=MID,DSECT=NO        MID
+*
+EOM0000  DS    0H
+         DROP  R15
+         LR    R10,R15                 base
+         USING EMFEOM,R10
+         LR    R7,R0                   SSCT
+         USING SSCT,R7
+         LR    R8,R1                   SSOB
+         USING SSOB,R8
+         L     R6,SSOBINDV             SSEN
+         USING SSOBEXT,R6
+*
+**       Obtain dynamic storage area
+*
+         IPK   ,
+         STORAGE OBTAIN,LOC=ANY,COND=YES,                              +
+               LENGTH=DSA@SIZE,SP=&SP230,KEY=(R2),LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BNZ   EOMXIT99                no, exit
+         LR    R12,R1                  DSA
+         USING DSA,R12
+         LA    R1,DSA@SIZE             DSA size
+         LR    R0,R12                  DSA address
+         XR    R15,R15                 zero
+         MVCL  R0,R14                  scrub DSA
+         ST    R13,GPR@BWD(,R12)
+         ST    R12,GPR@FWD(,R13)
+         LR    R13,R12                 savearea
+         ST    R2,DSAEKEY              caller key
+*
+**       Establish EOM listener recovery
+*
+         L     R11,=V(EMFSRV)          readonly ZEVT
+         USING ZEVT,R11
+         TM    ZEVTFLG2,ZEVT@RCV       RCV=YES?
+         BZ    EOM0010                 no, skip recovery
+         DROP  R11
+         LA    R9,DSAZRWA              ZRWA
+         USING ZRWA,R9
+         MVC   ZRWAID,=CL4'ZRWA'       ID
+         MVC   ZRWASUBN,MIDSUB         server name
+         MVC   ZRWAXMOD,MIDNAME        mainline
+         MVC   ZRWAXECT,MIDNAME        mainline
+         L     R3,=V(EMFRTM)           EMFRTM
+         BSM   R3,0                    set AMODE
+         MVC   DSAPLST(ESTAEXL),ESTAEX
+         ESTAEX (R3),                                                  +
+               PARAM=(R9),             ZRWA address                    +
+               TOKEN=DSATOKN,          save token                      +
+               MF=(E,DSAPLST)
+         LTR   R15,R15                 successful?
+         BNZ   EOMEXIT                 no
+         OI    DSAFLG1,DSA@STAE        recovery established
+*
+**       Activate EOM listener recovery
+*
+         ZRETRY EOMEXIT,               retry address                   +
+               ZRWA=(R9),              recovery workarea               +
+               MOD=MIDNAME,            mainline                        +
+               SRV=MIDNAME,            mainline                        +
+               WTO=NO,                 no error msg                    +
+               DUMP=NO,                no SVC dump                     +
+               LOGREC=NO,              no LOGREC                       +
+               RSN==AL4(RSN48)         ABEND RSN
+*
+**       Validity check server status
+*
+EOM0010  DS    0H
+         L     R11,SSCTSUSE            ZEVT
+         USING ZEVT,R11
+         CLC   ZEVTID,=CL4'ZEVT'       valid?
+         BNE   EOMEXIT                 no
+         TM    ZEVTFLG1,ZEVT@INI       server initialized?
+         BZ    EOMEXIT                 no
+         TM    ZEVTFLG1,ZEVT@ACT       server active?
+         BZ    EOMEXIT                 no
+         ST    R11,ZRWAZEVT            ZEVT address for recovery
+         MVC   ZRWASUBN,ZEVTSUBN       ZEMF server name
+         ZTRCE EOM=0,LINKAGE=LOCAL     trace
+*
+**       Copy EOM address space data
+*
+         L     R3,SSENJBNM             jobname list ptr
+         MVC   DSAJOBNM,4(R3)          copy jobname
+         MVC   DSAASID,SSENASID        ASID
+         MVC   DSAASCB,SSENASCB        ASCB
+         MVC   DSAJOBPT,SSENJBNM       jobname list ptr
+         ZTRCE EOM=1,LINKAGE=LOCAL     trace
+*
+**       Update EOM listener entry count
+*
+EOM0020  DS    0H
+         L     R2,ZEVTEOMC             listener count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTEOMC          update count
+         BNE   EOM0020                 changed: try again
+         ZTRCE EOM=2,LINKAGE=LOCAL     trace
+*
+**       Call EOM listener routines
+*
+         LA    R5,EOMTABLE             routine table
+         USING EOM,R5
+         ZTRCE EOM=3,LINKAGE=LOCAL     trace
+*
+EOM0030  DS    0H
+         CLC   EOMEPA,EOMTBEND         EoT?
+         BE    EOMEXIT                 yes, exit
+         L     R15,EOMEPA              routine EPA
+         BSM   R15,0                   set AMODE
+         BASR  R14,R15                 call routine
+         ZTRCE EOM=4,LINKAGE=BRANCH    trace
+*
+**       Reset EOM listener retry address
+*
+         ZRETRY EOMEXIT,               retry address                   +
+               ZRWA=(R9),              recovery workarea               +
+               MOD=MIDNAME,            mainline                        +
+               SRV=MIDNAME,            mainline                        +
+               WTO=NO,                 no error msg                    +
+               DUMP=NO,                no SVC dump                     +
+               LOGREC=NO,              no LOGREC                       +
+               RSN==AL4(RSN52)         ABEND RSN
+*
+**       Resume EOM listener routine calls
+*
+         ZTRCE EOM=5,LINKAGE=BRANCH    trace
+         LA    R5,EOM@SIZE(,R5)        next table entry
+         B     EOM0030                 loop
+*---------------------------------------------------------------------*
+*        Exit Routine                                                 *
+*--------+---------+---------+---------+---------+---------+---------+*
+EOMEXIT  DS    0H
+         TM    DSAFLG1,DSA@STAE        recovery active?
+         BZ    EOMXIT00                no
+         ESTAEX 0,TOKEN=DSATOKN        deactivate recovery
+*
+EOMXIT00 DS    0H
+         L     R2,DSAEKEY              caller key
+         L     R13,GPR@BWD(,R13)       caller savearea
+         STORAGE RELEASE,COND=NO,SP=&SP230,KEY=(R2),                   +
+               ADDR=(R12),LENGTH=DSA@SIZE,LINKAGE=SYSTEM
+*
+EOMXIT99 DS    0H
+         LM    R14,R12,GPR@R14(R13)    restore caller regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ESTAEX   ESTAEX 0,MF=L                 listform
+ESTAEXL  EQU   *-ESTAEX
+*---------------------------------------------------------------------*
+*        EOM listener routine table                                   *
+*--------+---------+---------+---------+---------+---------+---------+*
+EOMTABLE DS    0F
+         ZTABS GEN=EOM,TYPE=INITIAL    table start
+*
+         ZTABS GEN=EOM,                                                +
+               TYPE=ENTRY,                                             +
+               EP=QRESET               Queue element reset routine
+*
+EOMTBEND DS    0F
+         ZTABS GEN=EOM,TYPE=FINAL      table end
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        QRESET                                              */
+*/*                                                                  */
+*/* Function:    ZXQE queues reset service routine                   */
+*/*                                                                  */
+*/* Input Regs:  R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R6  ZQUE address                                    */
+*/*              R7  ZEXT address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+QRESET   ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+         LA    R6,ZEVTQUES             ZQUE
+         USING ZQUE,R6
+         ZTRCE EOM=A,LINKAGE=LOCAL     trace
+*
+**       Scan ZXQE elements queue
+*
+QRS0000  DS    0H
+         CLC   QUEZXQEA,=A(-1)         EoQ?
+         BE    QRSEXIT                 yes
+         ICM   R8,15,QUEZXQEA          ZXQE init?
+         BZ    QRS0099                 no, next queue
+         ZTRCE EOM=B,LINKAGE=LOCAL     trace
+*
+QRS0010  DS    0H
+         USING ZXQE,R8
+         CLC   XQEID,=CL4'ZXQE'        ZXQE?
+         BNE   QRS0099                 no, next queue
+         TM    XQEFLG1,XQE@XDIS        ZXQE disabled?
+         BNZ   QRS0080                 yes, next ZXQE element
+         ICM   R7,15,XQEZEXTP          ZEXT init?
+         BZ    QRS0080                 no, next element
+         USING ZEXT,R7
+         ZTRCE EOM=C,LINKAGE=LOCAL     trace
+*
+**       Scan ZEXT elements queue
+*
+QRS0020  DS    0H
+         CLC   EXTID,=CL4'ZEXT'        ZEXT?
+         BNE   QRS0099                 no, next queue
+         ZTRCE EOM=D,LINKAGE=LOCAL     trace
+*
+**       Locate address space token
+*
+         LOCASCB STOKEN=EXTSTOKN       STOKEN
+         LTR   R15,R15                 ASCB found?
+         BZ    QRS0030                 yes
+         ZTRCE EOM=E,LINKAGE=LOCAL     trace
+         B     QRS0060                 next ZEXT element
+*
+QRS0030  DS    0H
+         LR    R4,R1                   ASCB address
+         USING ASCB,R4
+         CL    R4,DSAASCB              ASCB match?
+         BE    QRS0040                 yes
+         ZTRCE EOM=F,LINKAGE=LOCAL     trace
+         B     QRS0060                 next ZEXT element
+*
+QRS0040  DS    0H
+         ICM   R3,15,ASCBASSB          ASSB?
+         BNZ   QRS0050                 yes
+         ZTRCE EOM=G,LINKAGE=LOCAL     trace
+         B     QRS0070                 free ZEXT entry
+*
+QRS0050  DS    0H
+         USING ASSB,R3
+         CLC   EXTSTOKN,ASSBSTKN       STOKEN match?
+         BE    QRS0070                 yes
+         ZTRCE EOM=H,LINKAGE=LOCAL     trace
+*
+**       Procees next ZEXT element
+*
+QRS0060  DS    0H
+         ICM   R7,15,EXTCHPTR          more ZEXTs
+         BNZ   QRS0020                 yes, ZEXT loop
+         ZTRCE EOM=I,LINKAGE=LOCAL     trace
+         B     QRS0080                 next ZXQE element
+*
+**       Free ZEXT element entry
+*
+QRS0070  DS    0H
+         OI    EXTFLG1,EXT@FREE        set free indicator
+         MVC   EXTFREE,=CL4'FREE'      mark it free
+         ZTRCE EOM=J,LINKAGE=LOCAL     trace
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   QRS0080                 yes
+         XC    EXTC(EXT@ZERO),EXTC     no, clear reused fields
+         ZTRCE EOM=K,LINKAGE=LOCAL     trace
+*
+**       Procees next ZXQE element
+*
+QRS0080  DS    0H
+         ICM   R8,15,XQECHPTR          more ZXQEs
+         BNZ   QRS0010                 yes, loop
+         ZTRCE EOM=L,LINKAGE=LOCAL     trace
+*
+**       Process next ZXQE queue
+*
+QRS0099  DS    0H
+         LA    R6,QUE@SIZE(,R6)        ZQUE entry size
+         ZTRCE EOM=M,LINKAGE=LOCAL     trace
+         B     QRS0000                 process next queue
+*
+QRSEXIT  DS    0H
+         ZTRCE EOM=N,LINKAGE=LOCAL     trace
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        Dynamic Storage Area                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+DSA      DSECT ,
+DSASAVE  DS    18F                     savearea
+DSASBSA  DS    18F                     subroutine savearea
+         DS    0X
+DSAFLG1  DS    XL1                     flags
+DSA@STAE EQU   X'80'                   recovery indicator
+DSA@RV1  EQU   X'40'                   -available
+DSA@RV2  EQU   X'20'                   -available
+DSA@RV3  EQU   X'10'                   -available
+DSA@RV4  EQU   X'08'                   -available
+DSA@RV5  EQU   X'04'                   -available
+DSA@RV6  EQU   X'02'                   -available
+DSA@RV7  EQU   X'01'                   -available
+         DS    0X
+DSAFLG2  DS    XL1                     more flags
+         DS    0X
+DSAASID  DS    XL2                     ASID
+         DS    0F
+DSAOPAR  DS    0F                      output parms
+DSARC    DS    F                       -1. R15
+DSARSN   DS    F                       -2. R0
+DSAGR1   DS    F                       -3. R1
+DSA@OPAL EQU   *-DSAOPAR               keep it together
+         DS    0F
+DSAEKEY  DS    F                       caller key
+DSATOKN  DS    F                       ESTAE token
+DSAASCB  DS    F                       terminating ASCB address
+DSAJOBPT DS    F                       jobname list address
+         DS    0C
+DSAJOBNM DS    CL8                     terminating jobname
+         DS    0F
+DSAESTAE DS    CL(ESTAEXL)             ESTAEX listform
+         DS    0F
+DSAZRWA  DS    CL(ZRWA@SZE)            ZRWA recovery workarea
+         DS    0F
+DSAPLST  DS    XL256                   parmlist
+         DS    0D
+DSA@SIZE EQU   *-DSA                   DSA size
+*---------------------------------------------------------------------*
+*        Subsystem Server Data Areas                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+         ZTABS GEN=EOM,DSECT=YES
+         ZMACS GEN=MID,ID=XID,DSECT=YES
+         IEFJSSOB (EN),CONTIG=NO
+         ZEVT  DSECT=YES,LIST=YES
+         END

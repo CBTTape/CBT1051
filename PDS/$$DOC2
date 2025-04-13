@@ -1,0 +1,128 @@
+*/*********************************************************************
+*/*
+*/*
+*/*                           zEMF
+*/*                   SMF EXITS MANAGEMENT
+*/*                         FACILITY
+*/*
+*/*
+*/* SMF EXITS MANAGEMENT FACILITY:
+*/*
+*/*  Bid farewell to the hassle of modifying source code every
+*/*  time you want to add or alter SMF exits.
+*/*
+*/*  Introducing zEMF, an automation tool that enables dynamic
+*/*  addition or modification of SMF exits.
+*/*
+*/*  Define your SMF exits rules effortlessly in the zEMF PARMLIB,
+*/*  and you're good to go.
+*/*
+*/*  Check out the example below for the rules outlined in the zEMF
+*/*  PARMLIB member, IEFUTL:
+*/*
+*/*
+*/*  JOB(PROD*,            PRODUCTION JOBS
+*/*      JOBCPU=10,5,       allow 10 additional seconds; 5 extensions
+*/*      STEPCPU=5,3,       allow 5 additional seconds; 3 extensions
+*/*      WAITTIME=JWT,3,    allow SMFPRMxx JWT wait time; 3 extensions
+*/*      SMF=255,           write SMF record for each granted extension
+*/*      WARNWTO=YES)       issue warning WTO for each granted extension
+*/*
+*/*  JOB(TEST*,            TEST JOBS
+*/*      JOBCPU=0,          donot allow additional CPU
+*/*      STEPCPU=0,         donot allow additional CPU
+*/*      WAITTIME=0,        donot allow additional WAIT time
+*/*      SMF=NO,            donot write SMF record
+*/*      WARNWTO=NO)        donot issue warning WTO message
+*/*
+*/*  TSO(TS*,              TECH SUPPORT TSO USERS
+*/*      WAITTIME=NOLIMIT,  unlimited WAIT time extensions
+*/*      SMF=NO,            donot write SMF record
+*/*      WARNWTO=NO)        donot issue warning message
+*/*
+*/** STC(*,                ALL STARTED TASKS
+*/*      JOBCPU=NOLIMIT,    unlimited job CPU extensions
+*/*      STEPCPU=NOLIMIT,   unlimited step CPU extensions
+*/*      WAITTIME=NOLIMIT,  unlimited WAIT time extensions
+*/*      SMF=240,           write SMF record for each extension
+*/*      WARNWTO=NO)        donot issue warning WTO message
+*/*
+*/*  OMVS(*,               OMVS SUBSYSTEM WORKLOAD
+*/*      JOBCPU=NOLIMIT,    unlimited job CPU extensions
+*/*      STEPCPU=NOLIMIT,   unlimited step CPU extensions
+*/*      WAITTIME=NOLIMIT,  unlimited WAIT time extensions
+*/*      SMF=250,           write SMF record for each extension
+*/*      WARNWTO=NO)        donot issue warning WTO message
+*/*
+*/*  ASCH(*,               ASCH SUBSYSTEM WORKLOAD
+*/*      JOBCPU=NOLIMIT,    unlimited job CPU extensions
+*/*      STEPCPU=NOLIMIT,   unlimited step CPU extensions
+*/*      WAITTIME=NOLIMIT,  unlimited WAIT time extensions
+*/*      SMF=251,           write SMF record for each extension
+*/*      WARNWTO=NO)        donot issue warning WTO message
+*/*
+*/*
+*/* SUPPORTED SMF EXITS:
+*/*
+*/*  V1R1 SUPPORTED EXITS:
+*/*   IEFUTL   - Time limit
+*/*   IEFUSO   - SYSOUT limit exit
+*/*   IEFUJP   - Job purge exit
+*/*   IEFU29   - SMF dump exit
+*/*   IEFU29L  - SMF log stream dump exit
+*/*   IEFU83   - SMF record exit
+*/*   IEFU84   - SMF record exit
+*/*   IEFU85   - SMF record exit
+*/*   IEFU86   - SMF record exit
+*/*
+*/*  V2R1 ADDITIONAL SUPPORTED EXITS:
+*/*   IEFUJV   - SMF job validation exit
+*/*   IEFUJI   - SMF job initiation exit
+*/*   IEFUSI   - SMF step initiation exit
+*/*   IEFACTRT - SMF job and step termination exit
+*/*
+*/*
+*/* zEMF INITIALIZATION OPTIONS:
+*/*
+*/*  LIB={DSname} Specifies the name of the zEMF initialization
+*/*               parameters PARMLIB dataset.
+*/*
+*/*  MEM={member} Specifies the zEMF initialization parameters
+*/*               member name. If not specified, the default member
+*/*               name is zEMFMSTR.
+*/*
+*/*  SAF={class}  Specifies the security class that will be used
+*/*               to make authorization checks. If not specified
+*/*               extermal security is not invoked.
+*/*               Refer to INSTLIB($RACF) for security server
+*/*               implementation details.
+*/*
+*/*  DBG={ON|OFF} Specifies if the debugging is ON or OFF.
+*/*               DBG=ON causes processing routines to issue code
+*/*               path informational WTO messages. If not specified,
+*/*               the default is DBG=OFF.
+*/*
+*/*  TRC={ON|OFF} Specifies if internal code tracing is ON or OFF.
+*/*               If not specified, the default is TRC=OFF.
+*/*
+*/*
+*/* zEMF EXTERNAL SECURITY:
+*/*
+*/*  When external security is enabled by setting the initialization
+*/*  parameter SAF=YES, users are required to possess READ authority
+*/*  to the following profile within RACF server class $ZEMFCLS:
+*/*
+*/*  - ZEMF.SERVER.CMD
+*/*
+*/*  For implementation details, please refer to the INSTLIB($RACF)
+*/*  member.
+*/*
+*/*
+*/* CONTACT ME:
+*/*
+*/*  Feel free to contact me if you have questions.
+*/*  Ben Marino
+*/*  b2marino@outlook.com
+*/*
+*/*
+*/*********************************************************************

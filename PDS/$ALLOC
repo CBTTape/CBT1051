@@ -1,0 +1,48 @@
+//$ALLOC   JOB ...
+//*
+//*******************************************************************/
+//*                                                                 */
+//* zEMF DATASETS ALLOCATION JCL PROCEDURE                          */
+//*                                                                 */
+//* This JCL allocates the zEMF server datasets.                    */
+//*                                                                 */
+//* PARMLIB  - Allocates initialization parameters dataset          */
+//* INSTLIB  - Allocates intallation procedures dataset             */
+//* SRCLIB   - Allocates assembler source dataset                   */
+//* OBJLIB   - Allocates object modules dataset                     */
+//*                                                                 */
+//* 1. Change hlq as required by your installation standards.       */
+//* 2. Change VOL=SER as required by your installation standards.   */
+//*                                                                 */
+//*******************************************************************/
+//*
+//STEP1   EXEC PGM=IEFBR14
+//PARMLIB  DD  DSN=SYS1.ZEMF.PARMLIB,        <---donot change hlq
+//             VOL=SER=??????,               <---change
+//             UNIT=SYSDA,
+//             DISP=(,CATLG),
+//             SPACE=(TRK,(128,64,32)),
+//             DCB=(LRECL=80,RECFM=FB,BLKSIZE=6160,DSORG=PO)
+//*
+//INSTLIB  DD  DSN=hlq.ZEMF.INSTLIB,         <---change
+//             VOL=SER=??????,               <---change
+//             UNIT=SYSDA,
+//             DISP=(,CATLG),
+//             SPACE=(TRK,(64,32,16)),
+//             DCB=(LRECL=80,RECFM=FB,BLKSIZE=6160,DSORG=PO)
+//*
+//SRCLIB   DD  DSN=hlq.ZEMF.SRCLIB,          <---change
+//             VOL=SER=??????,               <---change
+//             UNIT=SYSDA,
+//             DISP=(,CATLG),
+//             SPACE=(TRK,(128,64,32)),
+//             DCB=(LRECL=80,RECFM=FB,BLKSIZE=6160,DSORG=PO)
+//*
+//OBJLIB   DD  DSN=hlq.ZEMF.OBJLIB,          <---change
+//             VOL=SER=??????,               <---change
+//             UNIT=SYSDA,
+//             DISP=(,CATLG),
+//             SPACE=(TRK,(31,16,12)),
+//             DCB=(LRECL=80,RECFM=FB,BLKSIZE=3120,DSORG=PO)
+/*
+//

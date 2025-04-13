@@ -1,0 +1,34 @@
+&REL     SETC  'V1R1M0'            .version; release; modlevel
+&SUB     SETC  'ZEMF'              .Subsystem server name
+&SERVER  SETC  'ZEMFSRV'           .Subsystem server load module
+&SP99    SETC  '99'                .private storage subpool
+&SP130   SETC  '130'               .Jobstep private storage subpool
+&SP230   SETC  '230'               .Task storage subpool
+&SP241   SETC  '241'               .ECSA storage subpool
+&SP245   SETC  '245'               .ESQA storage subpool
+&SP255   SETC  '255'               .ELSQA storage subpool
+&TRACE   SETC  'YES'               .Subsystem server trace status
+&ZEMFSTC SETC  '1'                 .ZEMF SYSSTC exit name suffix
+&ZEMFTSO SETC  '2'                 .ZEMF SYSTSO exit name suffix
+&ZEMFJES SETC  '3'                 .ZEMF SYSJESn exit name suffix
+&ZEMFASC SETC  '4'                 .ZEMF SYSASCH exit name suffix
+&ZEMFOMV SETC  '5'                 .ZEMF SYSOMVS exit name suffix
+&UCODE   SETC  '2024'              .Subsystem server ABEND code
+&ZXQEPRI SETC  '16'                .ZXQE primary extent cells
+&ZXQESEC SETC  '32'                .ZXQE secondary extent cells
+&ZEXTPRI SETC  '08'                .ZEXT primary extent cells
+&ZEXTSEC SETC  '16'                .ZEXT secondary extent cells
+&ZPARTAB SETC  '4096'              .ZPAR table size (4k)
+&ZMSTTAB SETC  '8192'              .MSTR table size (4k)
+&ZMSETAB SETC  '8192'              .MSTE table size (4k)
+&ZRECTAB SETC  '32768'             .ZREC table size (32k)
+&SECONDS SETC  '3'                 .default CPU seconds
+&ZTIMERU SETC  '38400'             .Timer Unit value (1 second)
+&SYSOUTL SETC  '5000'              .default SYSOUT lines
+&EMFMSTR SETC  'ZEMFMSTR'          .PARMLIB initialization member
+&PARMDDN SETC  'ZEMFPARM'          .PARMLIB DDname default
+&ALLXIT  SETC  '*ALLXIT*'          .PARMLIB all exit members
+&PARMDSN SETC  'SYS1.ZEMF.PARMLIB' .PARMLIB DSName default
+&TOKEN   SETC  'MSAS_&SUB._&REL'   .Persistent system-level token
+&ZEMFCLS SETC  '$ZEMFCLS'          .ZEMF security server class name
+&CPYRGHT SETC  'Copyright: Ben Marino 2021-2024'

@@ -1,0 +1,242 @@
+EMFRTM   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        EMFRTM                                              */
+*/*                                                                  */
+*/* Function:    TCB-mode Recovery Termination Manager               */
+*/*                                                                  */
+*/* Description: Performs recovery functions on behalf of ZEMF       */
+*/*              subsystem server components.                        */
+*/*                                                                  */
+*/* Input Regs:  When the SDWA is supplied the contents of the       */
+*/*              registers are as follows:                           */
+*/*                                                                  */
+*/*              R1     SDWA address                                 */
+*/*              R2-R12 Unpredictable                                */
+*/*              R13    Savearea address                             */
+*/*              R14    Return Address                               */
+*/*              R15    Entry address                                */
+*/*                                                                  */
+*/*              When the SDWA is NOT supplied, the contents of      */
+*/*              the registers are as follows:                       */
+*/*                                                                  */
+*/*              R0     Decimal 12                                   */
+*/*              R1     ABEND completion code                        */
+*/*              R2     Address of parmlist or zero                  */
+*/*              R3-R13 Unpredictable                                */
+*/*              R14    Return address                               */
+*/*              R15    Entry address                                */
+*/*                                                                  */
+*/* Regs Usage:  R8  ZRWA address                                    */
+*/*              R9  SDWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+EMFRTM   AMODE 31
+EMFRTM   RMODE ANY
+         COPY  ZGBLS
+         USING EMFRTM,R15              entry
+         B     RTM0000
+         ZMACS GEN=MID,DSECT=NO        module ID
+*
+RTM0000  DS    0H
+         CL    R0,NOSDWA               SDWA?
+         BNE   RTM0010                 yes
+         DROP  R15
+         LA    R15,0                   percolate
+         BR    R14                     return
+*
+RTM0010  DS    0H
+         STM   R14,R12,GPR@R14(R13)    save regs
+         LR    R10,R15
+         USING EMFRTM,R10
+         LR    R9,R1                   SDWA
+         USING SDWA,R9
+         L     R8,SDWAPARM             ZRWA ptr
+         L     R8,0(,R8)               ZRWA address
+         USING ZRWA,R8
+         L     R11,ZRWAZEVT            ZEVT
+         USING ZEVT,R11
+         LA    R1,ZRWARTMS             savearea
+         ST    R13,GPR@BWD(,R1)        chain
+         LR    R13,R1                  it
+*
+**       Capture diagnostic data
+*
+         ICM   R3,15,ZRWARTRY          retry init?
+         BZ    RTMPERC                 no, percolate
+         TM    SDWAERRD,SDWACLUP       clean up only?
+         BNZ   RTMPERC                 yes
+         TM    SDWAERRC,SDWAPERC       percolated ABEND
+         BNZ   RTMPERC                 yes
+         TM    ZRWAFLG1,ZRWA@PER       recursive entry?
+         BNZ   RTMPERC                 yes
+         OI    ZRWAFLG1,ZRWA@PER       set recursion indicator
+         XC    ZRWAWORK,ZRWAWORK       clear work flags
+         MVC   ZRWAAPSW,SDWAEC2        copy ABEND PSW
+*
+         XC    ZRWASFLG,ZRWASFLG       clear flag
+         MVC   ZRWASABN,SDWACMPC       copy ABEND code
+         L     R3,ZRWABEND             ABEND code
+         SRL   R3,12                   shift it
+         LTR   R3,R3                   user ABEND code?
+         BZ    RTM0020                 yes
+         ST    R3,ZRWABEND             no
+         OI    ZRWAWORK,ZRWA@SYS       system ABEND code
+*
+RTM0020  DS    0H
+         MVC   ZRWATEA,SDWATRN2        translation address
+         MVC   ZRWARECR,MIDNAME        recovery routine name
+*
+         TM    ZRWAWORK,ZRWA@SYS       system ABEND code?
+         BZ    RTM0030                 no
+         ZMACS GEN=CNVX,ZRWACONA,ZRWABEND,TR=TRTABLE
+         MVI   ZRWATYPE,C'S'           system type
+         MVC   ZRWACODE(3),ZRWACONA+5  ABEND code
+         MVI   ZRWACODE+3,BLANK        trailing blank
+         B     RTM0040
+*
+RTM0030  DS    0H
+         ZMACS GEN=CNVD,DWORD=ZRWADWRD,ZRWACONA,ZRWABEND
+         MVI   ZRWATYPE,C'U'           user type
+         MVC   ZRWACODE,ZRWACONA+4     user ABEND code
+*
+RTM0040  DS    0H
+         ZMACS GEN=CNVX,ZRWACONR,ZRWARSN,TR=TRTABLE
+         MVC   ZRWARSNC,ZRWACONR       reason code
+*
+**       Init ABEND WTO message
+*
+         TM    ZRWAFLG1,ZRWA@WTO       WTO=NO?
+         BZ    RTM0060                 yes, skip WTO
+         MVC   ZRWAWTO(ZEMF99EL),ZEMF99E
+         MVC   ZRWAWSID,ZRWASUBN       show server name
+         MVC   ZRWAWMOD,ZRWALMOD       show module name
+         MVC   ZRWAWRTN,ZRWASECT       show routine name
+         MVC   ZRWAWTYP,ZRWATYPE       system type
+         MVC   ZRWAWCOD,ZRWACODE       ABEND code
+         MVC   ZRWAWRSN,ZRWACONR       reason code
+*
+**       Issue ABEND WTO message
+*
+         SETLOCK TEST,TYPE=LOCAL,                                      +
+               BRANCH=(NOTHELD,RTM0050),RELATED=('RTM0050')
+         WTO   MF=(E,ZRWAWTO),LINKAGE=BRANCH
+         B     RTM0060
+*
+RTM0050  DS    0H
+         WTO   MF=(E,ZRWAWTO)          LINKAGE=SVC
+*
+**       Init SVC dump parmlist
+*
+RTM0060  DS    0H
+         TM    ZRWAFLG1,ZRWA@DMP       DUMP=NO?
+         BZ    RTMRTRY                 yes, skip SDUMP
+         MVC   ZRWAPLST(SDUMPL),SDUMP
+         MVC   ZRWATTLE(DMPHDRTL),DMPHDR
+         MVC   ZRWADSUB,ZRWASUBN       show server name
+         MVC   ZRWADMOD,ZRWALMOD       show module name
+         MVC   ZRWADRTN,ZRWASECT       show routine name
+         MVC   ZRWADTYP,ZRWATYPE       system type
+         MVC   ZRWADCOD,ZRWACODE       ABEND code
+         MVC   ZRWADRSN,ZRWARSNC       reason code
+*
+**       Take SVC dump
+*
+         IPK   ,                       insert key
+         SPKA  0(0)                    supervisor key
+         SDUMP HDRAD=ZRWATTLE,MF=(E,ZRWAPLST)
+         SPKA  0(R2)                   restore key
+         ST    R15,ZRWASDRC            save SDUMP RC
+*
+**       Retry
+*
+RTMRTRY  DS    0H
+         MVC   SDWASRSV,ZRWAGPRS       set retry regs
+         TM    ZRWAFLG1,ZRWA@LOG       LOGREC=NO?
+         BZ    RTRY000                 yes, skip SETRP
+         SETRP RECORD=YES,WKAREA=(R9)
+*
+RTRY000  DS    0H
+         L     R3,ZRWARTRY             retry address
+         SETRP RC=4,                                                   +
+               WKAREA=(R9),            SDWA address                    +
+               RETADDR=(R3),           retry address                   +
+               RETREGS=YES,            retry regs                      +
+               FRESDWA=YES,            free SDWA                       +
+               RECPARM=ZRWARECP        recovery data
+         B     RTMEXIT                 exit
+*
+**       Percolate
+*
+RTMPERC  DS    0H
+         TM    ZRWAFLG1,ZRWA@LOG       LOGREC=NO?
+         BNZ   RTMP000                 yes, skip SETRP
+         SETRP RECORD=YES,WKAREA=(R9)
+*
+RTMP000  DS    0H
+         SETRP RC=0,WKAREA=(R9)        percolate
+*
+RTMEXIT  DS    0H
+         L     R13,GPR@BWD(,R13)       RTM savearea
+         LM    R14,R12,GPR@R14(R13)    restore RTM regs
+         BR    R14                     return to RTM
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+NOSDWA   DC    AL4(12)                 SDWA not supplied
+TRTABLE  DC    CL16'0123456789ABCDEF'  translate table
+*---------------------------------------------------------------------*
+*        SDUMP listform                                               *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+SDUMP    SDUMP SDATA=(SQA,CSA,NUC,LSQA,RGN,LPA,TRT),MF=L
+SDUMPL   EQU   *-SDUMP
+SDUMPMAX DS    0XL(256-SDUMPL+1)
+         DS    0F
+DMPHDR   DC    AL1(DMPHDRLN)           dump title length
+DMPTITLE DC    C'ZEMF SERVER ERROR; nnnnnnn/nnnnnnn ?0000/00000000'
+DMPHDRLN EQU   *-DMPTITLE
+DMPHDRTL EQU   *-DMPHDR
+DMPHLMAX DS    0XL(100-DMPHDRLN+1)
+*---------------------------------------------------------------------*
+*        WTO Error Message                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ZEMF99E  WTO   'ZEMF99E ZEMF SERVER ERROR; nnnnnnn/nnnnnnn ABEND=?0000 +
+               RSN=00000000',ROUTCDE=2,DESC=4,MF=L
+ZEMF99EL EQU   *-ZEMF99E
+ZEMF99MX DS    0XL(100-ZEMF99EL+1)
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*--------+---------+---------+---------+---------+---------+---------+*
+*        Subsystem Server Data Areas                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+         ZEVT  DSECT=YES,LIST=YES
+         END   ,

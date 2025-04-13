@@ -1,0 +1,2227 @@
+EMFINI   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* NAME:        EMFINI                                              */
+*/*                                                                  */
+*/* FUNCTION:    ZEMF subsystem server initialization routine        */
+*/*                                                                  */
+*/* DESCRIPTION: Receives control from the SSI in the Master         */
+*/*              Scheduler address space to initialize the           */
+*/*              ZEMF subsystem server evironment.                   */
+*/*                                                                  */
+*/* INPUT REGS:  R1  Parmlist                                        */
+*/*                  Word 1 SSCT address                             */
+*/*                  Word 2 JSIPL address                            */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry point address                             */
+*/*                                                                  */
+*/* REGS USAGE:  R7  Parmlist                                        */
+*/*              R8  JSIPL address                                   */
+*/*              R9  SSCT address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Save area address                               */
+*/*                                                                  */
+*/* OUTPUT REGS: R0  Reason code                                     */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/* ATTRIBUTES:  TCB-mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Key 0                                               */
+*/*              Supervisor state                                    */
+*/*              LNKLST-resident                                     */
+*/*                                                                  */
+*/* COPYRIGHT:   Ben Marino. 2021 - 2024 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+EMFINI   AMODE 31
+EMFINI   RMODE ANY
+         COPY  ZGBLS
+         USING EMFINI,R15              entry
+         STM   R14,R12,GPR@R14(R13)    caller regs
+         B     INI0000
+         ZMACS GEN=MID,DSECT=NO        MID
+*
+INI0000  DS    0H
+         DROP  R15
+         LR    R10,R15                 base
+         USING EMFINI,R10
+         LR    R7,R1                   parm reg
+         L     R9,0(,R7)               SSCT
+         USING SSCT,R9
+         L     R8,4(,R7)               JSIPL
+         USING JSIPL,R8
+*
+**       Obtain dynamic storage area
+*
+         L     R3,=AL4(DSA@SIZE)       DSA size
+         STORAGE OBTAIN,LOC=ANY,COND=NO,                               +
+               LENGTH=(R3),SP=&SP230,LINKAGE=SYSTEM
+         LR    R12,R1
+         USING DSA,R12
+         LR    R2,R1
+         XR    R15,R15
+         MVCL  R2,R14                  scrub DSA
+         ST    R13,GPR@BWD(,R1)
+         ST    R1,GPR@FWD(,R13)
+         LR    R13,R1                  savearea
+         ST    R8,DSAJSIPL             JSIPL address
+         XC    DSARC,DSARC             RC
+         DROP  R8
+*
+**       Initialize local ZEVT table
+*
+         LA    R11,DSALOCAL            local ZEVT
+         USING ZEVT,R11
+         MVC   ZEVTID,=CL4'ZEVT'       ID
+         MVC   ZEVTTYPE,=CL4'LOCAL'    set indicator
+         MVC   ZEVTSUBN,SSCTSNAM       subsystem name
+         ZWTO  MID=ZEMF00I,V1=ZEVTSUBN init in progress
+*
+**       Locate previous instance
+*
+         ZCALL SR=RTTOKEN              get token
+         CLC   DSARC,=AL4(IEANT_OK)    previous instance?
+         BE    INI0010                 yes
+         CLC   DSARC,=AL4(IEANT_NOT_FOUND) not found?
+         BE    INI0020                 yes
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         B     INIEXIT                 exit
+*
+INI0010  DS    0H
+         LA    R5,DSATOKEN             token
+         USING ZTKN,R5
+         ICM   R11,15,ZTKNZEVT         ZEVT?
+         BZ    INI0020                 no
+         USING ZEVT,R11
+         ST    R11,DSAPZEVT            previous ZEVT
+         MVC   DSAPRETK,ZTKNLPTK       previous ZEMFSRV delete token
+         DROP  R5
+*
+**       Validity check subsystem name
+*
+INI0020  DS    0H
+         LA    R11,DSALOCAL            local ZEVT
+         CLI   SSCTSNAM+3,BLANK        valid subsys name?
+         BNE   INI0030                 yes
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN12)      RSN
+         ZWTO  MID=ZEMF04E             no
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         B     INIEXIT                 exit
+*
+**       Delete and reload subsystem server
+*
+INI0030  DS    0H
+         ZCALL SR=ZDYNSRV
+         LTR   R15,R15                 successful?
+         BZ    INI0040                 yes
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         B     INIEXIT                 exit
+*
+**       Storage obtain read/write ZEVT
+*
+INI0040  DS    0H
+         STORAGE OBTAIN,LOC=ANY,COND=YES,                              +
+               LENGTH=ZEVT@SZE,SP=&SP245,BNDRY=PAGE,LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BZ    INI0050                 yes
+         ST    R15,DSARC               save RC
+         ZWTO  MID=ZEMF20E,                                            +
+               V1==CL3'245',           show subpool                    +
+               V2=DSARC                show RC
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         B     INIEXIT                 exit
+*
+**       Copy readonly ZEVT to read/write ZEVT
+*
+INI0050  DS    0H
+         LR    R11,R1                  address
+         USING ZEVT,R11
+         LR    R2,R1                   copy address
+         LA    R3,ZEVT@SZE             size
+         LR    R5,R3                   copy size
+         L     R4,DSASRVA              ZEMFSRV EPA
+         MVCL  R2,R4                   copy to ESQA
+*
+**       Init subsystem server environment
+*
+         ST    R9,ZEVTSSCT             init SSCT
+         ST    R11,ZEVTZEVT            init ZEVT
+         ST    R11,SSCTSUSE            journal ZEVT
+         MVC   ZEVTSRVA,DSASRVA        init ZEMFSRV EPA
+         MVC   ZEVTLPTK,DSALPTKN       init CSVDYLPA token
+         MVC   ZEVTSUBN,SSCTSNAM       init subsystem name
+         MVC   ZEVTTYPE,=CL4'R/W'      set read/write indicator
+         MVC   ZEVTSIZE,=AL4(ZEVT@SZE) init ZEVT size
+         MVC   ZEVTDYNE,=AL4(ZDYNTABE) DYNX entry count
+*
+**       Init system environment
+*
+         USING PSA,0
+         L     R3,FLCCVT               CVT
+         USING CVT,R3
+         MVC   ZEVTSYSN,CVTSNAME       init system name
+         L     R4,CVTECVT              ECVT
+         USING ECVT,R4
+         MVC   ZEVTLPAR,ECVTLPNM       init LPAR name
+         MVC   ZEVTVMID,ECVTVMNM       init VM host ID
+         L     R4,CVTJESCT             JES control table
+         USING JESCT,R4
+         MVC   ZEVTJESN,JESPJESN       init primary subsystem name
+         TM    CVTFLAG2,CVTALR         ASN/LX reuse enabled?
+         BZ    INI0060                 no
+         OI    ZEVTFLG3,ZEVT@ALR       yes
+         DROP  R3,R4
+*
+**       Parse subsystem server parameters
+*
+INI0060  DS    0H
+         ZCALL SR=PARINI
+         LTR   R15,R15                 successful?
+         BZ    INI0065                 yes
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         B     INIEXIT                 exit
+*
+**       Page unprotect readonly ZEVT
+*
+INI0065  DS    0H
+         L     R3,DSASRVA              ZEMFSRV
+ROV      USING ZEVT,R3
+         LA    R4,ZEVT@SZE(,R3)        ZEVT size
+         PGSER R,UNPROTECT,A=(R3),EA=(R4)
+*
+**       Update readonly ZEVT
+*
+         L     R4,=A(KEYTAB)           subsystem ID table
+         LA    R4,KEYJESN              KEYTAB JES2/3 entry
+         USING XKEY,R4
+         MVC   ROV.ZEVTZEVT,SSCTSUSE   R/W ZEVT
+         MVC   XKEYSUBN,ZEVTJESN       set primary subsystem
+         MVC   ROV.ZEVTTYPE,=CL4'READ' readonly ZEVT
+         OI    ROV.ZEVTFLG1,ZEVT@ROV   set indicator
+         TM    ZEVTFLG2,ZEVT@RCV       RCV=YES?
+         BZ    INI0070                 no
+         OI    ROV.ZEVTFLG2,ZEVT@RCV   set RCV=YES
+         ZTRCE INI=A,LINKAGE=LOCAL     trace
+         DROP  R4,ROV
+*
+**       Page reprotect readonly ZEVT
+*
+INI0070  DS    0H
+         L     R3,DSASRVA              ZEMFSRV
+         LA    R4,ZEVT@SZE(,R3)        ZEVT size
+         PGSER R,PROTECT,A=(R3),EA=(R4)
+         ZTRCE INI=B,LINKAGE=LOCAL     trace
+*
+**       Create subsystem server instance token
+*
+         ZCALL SR=CRTOKEN
+         CLC   DSARC,=AL4(IEANT_OK)    successful?
+         BE    INI0075                 yes
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         ZTRCE INI=C,LINKAGE=LOCAL     trace
+         B     INIEXIT                 exit
+*
+**       Create recovery environment
+*
+INI0075  DS    0H
+         TM    ZEVTFLG2,ZEVT@RCV       RCV=YES,
+         BZ    INI0085                 no, skip recovery
+         LA    R8,DSAZRWA              ZRWA
+         USING ZRWA,R8
+         ST    R11,ZRWAZEVT            ZEVT
+         MVC   ZRWAID,=CL4'ZRWA'       ID
+         MVC   ZRWAXMOD,MIDNAME        set MID
+         MVC   ZRWAXECT,MIDNAME        set CSECT
+         MVC   ZRWASUBN,ZEVTSUBN       set server name
+         MVC   DSAPLST(ESTAEXL),ESTAEX
+         L     R3,ZEVTRTMA             EMFRTM
+         BSM   R3,0                    set AMODE
+         ESTAEX (R3),                                                  +
+               PARAM=(R8),             ZRWA address                    +
+               TOKEN=DSATOKN,          save ESTAEX token               +
+               MF=(E,DSAPLST)
+         ST    R15,DSARC               RC
+         LTR   R2,R15                  successful?
+         BZ    INI0080                 yes
+*
+**       Recovery environment create failed
+*
+         MVC   DSARSN,=AL4(RSN20)      RSN
+         ZWTO  MID=ZEMF22E,V1=DSARC,V2=DSARSN
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         ZTRCE INI=D,LINKAGE=LOCAL     trace
+         B     INIEXIT                 exit
+*
+**       Set recovery retry address
+*
+INI0080  DS    0H
+         OI    DSAFLG1,DSA@STAE        ESTAEX created
+         ZRETRY INI0090,               retry address                   +
+               ZRWA=DSAZRWA,           ZRWA address                    +
+               MOD=MIDNAME,            mainline                        +
+               SRV=MIDNAME,            mainline                        +
+               WTO=NO,                 donot issue failure msg         +
+               DUMP=NO,                donot take SDUMP                +
+               LOGREC=NO,              no LOGREC                       +
+               RSN==AL4(RSN40)         RSN
+*
+**       Release previous instance resources
+*
+INI0085  DS    0H
+         ZCALL SR=PREDEL               free previous instance
+         ZTRCE INI=E,LINKAGE=LOCAL     trace
+         TM    ZEVTFLG2,ZEVT@RCV       RCV=YES,
+         BZ    INI0100                 no, skip retry
+*
+**       Reset recovery retry address
+*
+INI0090  DS    0H
+         ZRETRY INIEXIT,               retry address                   +
+               ZRWA=DSAZRWA,           ZRWA address                    +
+               MOD=MIDNAME,            mainline                        +
+               SRV=MIDNAME,            mainline                        +
+               WTO=YES,                issue failure msg               +
+               DUMP=YES,               take SDUMP                      +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN24)         RSN
+         ZTRCE INI=F,LINKAGE=LOCAL     trace
+*
+**       Storage obtain PARMLIB tables
+*
+INI0100  DS    0H
+         LA    R3,DSAXSAWA             XSA
+         USING XSA,R3
+         XC    XSA(XSACLEAR),XSA       scrub XSA
+         MVC   XSAID,=CL4'XSA'         ID
+         OI    XSAFLG1,XSA@INIR        EMFINI caller
+         ZCALL SRV=ZEVTGETT,(R3)       GETTABS EPA
+         LTR   R15,R15                 successful?
+         BNZ   INI0110                 no
+         MVC   DSACPID,XSACPID         ZXQE staging CPID
+         MVC   DSACPXT,XSACPXT         ZEXT staging CPID
+         MVC   DSAZIOA,XSAZIOA         ZIO block address
+         MVC   DSAMSTRA,XSAMSTRA       MSTR table address
+         MVC   DSAMSTRN,XSAMSTRA       current MSTR entry address
+         MVC   DSAZRECA,XSAZRECA       ZREC table address
+         MVC   DSAZPARA,XSAZPARA       ZPAR table address
+         ZTRCE INI=G,LINKAGE=LOCAL     trace
+         B     INI0120                 carry on
+         DROP  R3
+*
+INI0110  DS    0H
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         ZTRCE INI=H,LINKAGE=LOCAL     trace
+         B     INIEXIT                 exit
+*
+**       Read PARMLIB master member
+*
+INI0120  DS    0H
+         MVC   DSAXTMEM,ZEVTMSTR       master member name
+         ZCALL SR=READMEM
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         LTR   R15,R15                 successful?
+         BNZ   INI0150                 no
+         ZTRCE INI=I,LINKAGE=LOCAL     trace
+*
+**       Parse PARMLIB master member
+*
+         XC    DSAMSTRC,DSAMSTRC       MSTR entry count
+         ZCALL SR=GETMSTR
+         LTR   R15,R15                 successful?
+         BZ    INI0130                 yes
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         ZTRCE INI=J,LINKAGE=LOCAL     trace
+         B     INIEXIT                 exit
+*
+**       Read PARMLIB exit member
+*
+INI0130  DS    0H
+         L     R4,DSAMSTRC             MSTR entries
+         L     R5,DSAMSTRA             MSTR address
+         USING MSTR,R5
+         LA    R3,DSAXSAWA             XSA
+         USING XSA,R3
+         XC    XSA(XSACLEAR),XSA       scrub XSA
+         MVC   XSAID,=CL4'XSA'         ID
+         ZTRCE INI=K,LINKAGE=LOCAL     trace
+*
+INI0140  DS    0H
+         MVC   DSAXTMEM,MSTRNAME       member name
+         OI    XSAFLG1,XSA@INIR        EMFINI caller
+         ZCALL SR=READMEM              READMEM
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         LTR   R15,R15                 successful?
+         BNZ   INI0150                 no
+         ZTRCE INI=L,LINKAGE=LOCAL     trace
+*
+**       Parse PARMLIB exit member
+*
+         ST    R5,XSAMSTRE             MSTR table entry
+         MVC   XSACPID,DSACPID         ZXQE staging CPID
+         MVC   XSACPXT,DSACPXT         ZEXT staging CPID
+         MVC   XSAZRECA,DSAZRECA       ZREC table address
+         MVC   XSAZPARA,DSAZPARA       ZPAR table address
+         MVC   XSAEXIT,DSAXTMEM        exit member name
+         OI    XSAFLG1,XSA@INIR        EMFINI caller
+         ZCALL SRV=ZEVTXPAR,(R3)       XMEMPAR
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         LTR   R15,R15                 successful?
+         BNZ   INI0150                 no
+         ZTRCE INI=M,LINKAGE=LOCAL     trace
+*
+**       Process next exit member
+*
+         LA    R5,MSTR@SZE(,R5)        next MSTR entry
+         BCT   R4,INI0140              loop
+         ZTRCE INI=N,LINKAGE=LOCAL     trace
+*
+**       Queue ZXQE element entry
+*
+         MVC   XSACPID,DSACPID         ZXQE staging CPID
+         MVC   XSACPXT,DSACPXT         ZEXT staging CPID
+         MVC   XSAEXIT,=CL8'&ALLXIT'   process all exits
+         OI    XSAFLG1,XSA@INIR        EMFINI caller
+         ZCALL SRV=ZEVTXQUE,(R3)       XMEMQUE
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         LTR   R15,R15                 successful?
+         BNZ   INI0150                 no
+         ZTRCE INI=O,LINKAGE=LOCAL     trace
+         B     INI0160                 carry on
+         DROP  R3
+*
+INI0150  DS    0H
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         ZTRCE INI=P,LINKAGE=LOCAL     trace
+         B     INIEXIT                 exit
+*
+**       Add Dynamic Exits Facility exits
+*
+INI0160  DS    0H
+         LA    R3,DSAXSAWA             XSA
+         USING XSA,R3
+         XC    XSA(XSACLEAR),XSA       scrub XSA
+         MVC   XSAID,=CL4'XSA'         ID
+         MVC   XSAMSTRA,DSAMSTRA       MSTR table address
+         MVC   XSAMSTRC,DSAMSTRC       MSTR entry count
+         OI    XSAFLG1,XSA@INIR        EMFINI caller
+         ZCALL SRV=ZEVTADDX,(R3)       ADDEXIT
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         LTR   R15,R15                 successful?
+         BZ    INI0180                 yes
+         ZTRCE INI=Q,LINKAGE=LOCAL     trace
+*
+**       Delete added Dynamic Exits Facility exits
+*
+INI0170  DS    0H
+         LA    R3,DSAXSAWA             XSA
+         USING XSA,R3
+         XC    XSA(XSACLEAR),XSA       scrub XSA
+         MVC   XSAID,=CL4'XSA'         ID
+         MVC   XSAMSTRA,DSAMSTRA       MSTR table address
+         MVC   XSAMSTRC,DSAMSTRC       MSTR entry count
+         OI    XSAFLG1,XSA@INIR        EMFINI caller
+         ZCALL SRV=ZEVTDELX,(R3)       DELEXIT
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         LTR   R15,R15                 successful?
+         BZ    INI0180                 yes
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         ZTRCE INI=R,LINKAGE=LOCAL     trace
+         B     INIEXIT                 exit
+*
+**       Delete subsystem command prefix
+*
+INI0180  DS    0H
+         MVI   DSAPREFX,BLANK
+         MVC   DSAPREFX+1(7),DSAPREFX  clear prefix
+         MVC   DSAOWNER,DSAPREFX       clear owner
+         MVC   DSAPREFX(4),SSCTSNAM    init prefix
+         MVC   DSAOWNER(4),SSCTSNAM    init owner
+         CPF   REQUEST=DELETE,                                         +
+               PREFIX=DSAPREFX,                                        +
+               MF=(E,DSACPF)           delete prefix
+         ST    R15,DSARC               save RC
+         ST    R0,DSARSN               save RSN
+         ZTRCE INI=S,LINKAGE=LOCAL     trace
+*
+**       Define subsystem command prefix
+*
+         CPF   REQUEST=DEFINE,                                         +
+               OWNER=DSAOWNER,         prefix owner                    +
+               PREFIX=DSAPREFX,        prefix name                     +
+               SCOPE=SYSTEM,           this system only                +
+               REMOVE=NO,              keep prefix with commands       +
+               FAILDISP=RETAIN,        keep it defined until deleted   +
+               MF=(E,DSACPF)           define prefix
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         LTR   R15,R15                 successful?
+         BZ    INI0190                 yes
+         ZTRCE INI=T,LINKAGE=LOCAL     trace
+         ZWTO  MID=ZEMF10E,V1=DSARC,V2=DSARSN
+*
+**       Convert LOCAL clock to decimal
+*
+INI0190  DS    0H
+         L     R1,FLCCVT               CVT
+         USING CVT,R1
+         L     R1,CVTEXT2              CVT extension
+         USING CVTXTNT2,R1
+         STCK  ZEVTISTK                current UTC/GMT clock value
+         LM    R2,R3,ZEVTISTK          load clock value
+         LM    R4,R5,CVTLDTO           load offset value
+         ALR   R3,R5                   add time offset
+         ALCR  R2,R4                   add w/carry offset
+         LM    R4,R5,CVTLSO            load leap seconds
+         SLR   R3,R5                   subtract leap seconds
+         SLBR  R2,R4                   subtract w/borrow leap seconds
+         STM   R2,R3,ZEVTISTK          store LOCAL time clock
+         MVC   DSASCONV(STCK@CNL),STCKLIST
+         STCKCONV STCKVAL=ZEVTISTK,                                    +
+               CONVVAL=ZEVTOSTK,TIMETYPE=DEC,DATETYPE=MMDDYYYY,        +
+               MF=(E,DSASCONV)
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         LTR   R15,R15                 successful?
+         BZ    INI0200                 yes
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         ZTRCE INI=R,LINKAGE=LOCAL     trace
+         B     INIEXIT                 exit
+*
+**       Activate SSI listener routines
+*
+INI0200  DS    0H
+         OI    ZEMFCMD,AMODE31         EMFCMD AMODE
+         OI    ZEMFEOM,AMODE31         EMFEOM AMODE
+         TM    ZEVTFLG2,ZEVT@TST       TST=YES?
+         BNZ   INI0210                 yes, skip activation
+         LA    R3,ZEVTSSVT             SSVT address
+         ST    R3,SSCTSSVT             activate subsystem server
+*
+INI0210  DS    0H
+         OI    ZEVTFLG1,ZEVT@SSI       listeners activated
+         OI    ZEVTFLG1,ZEVT@INI       initialization complete
+         OI    ZEVTFLG1,ZEVT@ACT       subsystem is now active
+*
+**       Issue initialization complete msg
+*
+         ZWTO  MID=ZEMF01I,V1=ZEVTSUBN issue complete msg
+         ZTRCE INI=U,LINKAGE=LOCAL     trace
+*
+**       Validity check testing request
+*
+         ICM   R15,15,SSCTSSVT         subsystem server active?
+         BNZ   INIEXIT                 yes, testing not allowed
+         TM    ZEVTFLG2,ZEVT@TST       TST=YES?
+         BZ    INIEXIT                 no, exit
+         ZCALL EP=EMFTST               test exits
+         ZTRCE INI=V,LINKAGE=LOCAL     trace
+*
+**       Set recovery retry address
+*
+INIEXIT  DS    0H
+         ZRETRY INIXIT00,              retry address                   +
+               ZRWA=DSAZRWA,           ZRWA address                    +
+               WTO=YES,                issue failure msg               +
+               DUMP=YES,               take SDUMP                      +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN28)         RSN
+         ZTRCE INI=W,LINKAGE=LOCAL     trace
+*
+**       Storage release PARMLIB tables
+*
+         LA    R3,DSAXSAWA             XSA
+         USING XSA,R3
+         XC    XSA(XSACLEAR),XSA       scrub XSA
+         MVC   XSAID,=CL4'XSA'         ID
+         MVC   XSAZIOA,DSAZIOA         ZIO block address
+         MVC   XSACPID,DSACPID         ZXQE staging CPID
+         MVC   XSACPXT,DSACPXT         ZEXT staging CPID
+         MVC   XSAMSTRA,DSAMSTRA       MSTR table address
+         MVC   XSAZRECA,DSAZRECA       ZREC table address
+         MVC   XSAZPARA,DSAZPARA       ZPAR table address
+         ZCALL SRV=ZEVTFRET,(R3)       FRETABS
+         LTR   R15,R15                 successful?
+         BZ    INIXIT00                yes
+         DROP  R3
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         ZWTO  MID=ZEMF05E,V1=ZEVTSUBN,V2=DSARC,V3=DSARSN
+         ZTRCE INI=X,LINKAGE=LOCAL     trace
+*
+**       Delete recovery envoronment
+*
+INIXIT00 DS    0H
+         TM    DSAFLG1,DSA@STAE        recovery active?
+         BZ    INIXIT10                no
+         ESTAEX 0,TOKEN=DSATOKN        deactivate recovery
+         NI    DSAFLG1,XFF-DSA@STAE    reset indicator
+         ZTRCE INI=Y,LINKAGE=LOCAL     trace
+*
+**       Release dynamic storage area
+*
+INIXIT10 DS    0H
+         L     R13,GPR@BWD(,R13)       caller savearea
+         L     R2,=AL4(DSA@SIZE)       DSA size
+         STORAGE RELEASE,COND=NO,                                      +
+               ADDR=(R12),LENGTH=(R2),SP=&SP230,LINKAGE=SYSTEM *Ben
+         ZTRCE INI=Z,LINKAGE=LOCAL     trace
+*
+**       Exit
+*
+INIXIT99 DS    0H
+         XR    R15,R15                 RC
+         LM    R0,R12,GPR@R0(R13)      restore caller regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     exit
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ESTAEX   ESTAEX 0,MF=L
+ESTAEXL  EQU   *-ESTAEX
+         DS    0F
+STCKLIST STCKCONV MF=L
+STCK@CNL EQU   *-STCKLIST
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         CSVDYNEX dynamic exits name table                  */
+*/*                                                                  */
+*/* Description:  Generates dynamic exits table entries              */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ZTABDYNT DS    0F
+ZTABDYNE ZTABS GEN=DYN,DSECT=NO    CSVDYNEX exit table
+ZTABDYNZ EQU   *-ZTABDYNT          CSVDYNEX exit table size
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         Exit subsystem IDs parameter table                 */
+*/*                                                                  */
+*/* Description:  Generates dynamic exits table                      */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ZSUBKEYT DS    0F
+ZSUBKEYE ZTABS GEN=KEY,DSECT=NO    Exit keyword parameter table
+ZSUBKEYZ EQU   *-ZSUBKEYT          Exit keyword parameter table size
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ZDYNSRV                                             */
+*/*                                                                  */
+*/* Function:    Load ZEMFSRV server in dynamic-LPA subroutine       */
+*/*                                                                  */
+*/* Input Regs:  R9  SSCT address                                    */
+*/*              R11 Local ZEVT address                              */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  ZTKN address                                    */
+*/*              R9  SSCT address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 Local ZEVT address                              */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ZDYNSRV  ZMACS GEN=SUBENTY             entry
+         USING ZEVT,R11
+*
+**       Serialize CSVDYLPA request
+*
+         MVC   DSAPLST(CSVENQL),CSVENQ
+         ENQ   LINKAGE=SYSTEM,MF=(E,DSAPLST)
+         OI    DSAFLG1,DSA@LENQ
+         LA    R4,7                    delete loop
+*
+**       Delete ZEMFSRV from Dynamic-LPA
+*
+ZDYN000  DS    0H
+         LA    R2,DSADYLPA
+         USING LPMED,R2
+         XC    DSADYLPA(LPMED_LEN),DSADYLPA
+         MVC   LPMEDNAME,=CL8'&SERVER'
+         CSVDYLPA REQUEST=DELETE,                                      +
+               MODINFO=(R2),                                           +
+               TYPE=CURRENT,           current instance                +
+               NUMMOD=LMODDCT,         delete count                    +
+               SECMODCHECK=NO,         skip FACILITY class check       +
+               RETCODE=DSARC,          RC                              +
+               RSNCODE=DSARSN,         RSN                             +
+               MF=(E,DYLPAL)
+         MVC   DSALPFLG,LpmedOutputFlags
+         CLC   DSARC,=AL4(RC0)         successful?
+         BNE   ZDYN010                 no, test further
+         BCT   R4,ZDYN000              yes, delete all instances
+*
+ZDYN010  DS    0H
+         CLC   DSARC,=AL4(RC4)         warning RC?
+         BNE   ZDYN020                 no
+         CLC   DSARSN,LRSN401          warning?
+         BE    ZDYN030                 yes
+*
+ZDYN020  DS    0H
+         ZWTO  MID=ZEMF03E,            issue error msg                 +
+               V1==CL3'DEL',           show function                   +
+               V2==CL8'&SERVER',       show module                     +
+               V3=DSARC,               show RC                         +
+               V4=DSARSN,              show RSN                        +
+               V5=DSALPFLG             show flags
+         B     ZDYNXIT                 exit
+*
+**       Add ZEMFSRV to Dynamic-LPA
+*
+ZDYN030  DS    0H
+         USING PSA,0                   FLC
+         L     R3,FLCCVT               CVT
+         USING CVT,R3
+         LA    R2,DSADYLPA
+         USING LPMEA,R2
+         XC    DSADYLPA(LPMEA_LEN),DSADYLPA
+         MVC   LPMEANAME,=CL8'&SERVER'
+         OI    LPMEAINPUTFLAGS0,LPMEAFIXED
+         OI    LPMEAINPUTFLAGS0,LPMEASTORAGEOWNERSYSTEM
+         CSVDYLPA REQUEST=ADD,                                         +
+               MODINFO=(R2),                                           +
+               MODINFOTYPE=MEMBERLIST, by member name                  +
+               BYADDR=NO,              fetch required                  +
+               NUMMOD=LMODACT,         module add count                +
+               APFREQUIRED=YES,        APF-authorized                  +
+               SECMODCHECK=NO,         skip FACILITY class check       +
+               DCBPTR=CVTLINK,         search LNKLST                   +
+               REQUESTOR=LMODREQ,      requestor ID                    +
+               RETCODE=DSARC,          RC                              +
+               RSNCODE=DSARSN,         RSN                             +
+               MF=(E,DYLPAL)
+         MVC   DSALPFLG,LpmeaOutputFlags
+         DROP  R3
+*
+**       Release CSVDYLPA serialization
+*
+         MVC   DSAPLST(CSVDEQL),CSVDEQ
+         DEQ   LINKAGE=SYSTEM,MF=(E,DSAPLST)
+         NI    DSAFLG1,XFF-DSA@LENQ
+         CLC   DSARC,=AL4(RC0)         successful?
+         BE    ZDYN050                 yes
+         CLC   DSARC,=AL4(RC4)         warning RC?
+         BNE   ZDYN040                 no
+         CLC   DSARSN,LRSN401          warning?
+         BNE   ZDYN040                 no
+         TM    LPMEAOUTPUTFLAGS0,LPMEASUCCESS
+         BNZ   ZDYN050                 successful
+*
+**       Issued initialization failed msgs
+*
+ZDYN040  DS    0H
+         ZWTO  MID=ZEMF03E,            error                           +
+               V1==CL3'ADD',           show function                   +
+               V2==CL8'&SERVER',       show server name                +
+               V3=DSARC,               show RC                         +
+               V4=DSARSN,              show RSN                        +
+               V5=DSALPFLG             show flags
+         B     ZDYNXIT                 exit
+*
+ZDYN050  DS    0H
+         MVC   DSALPTKN,LPMEADELETETOKEN  copy delete token
+         MVC   DSASRVA,LPMEALOADPOINTADDR copy LMOD address
+         OI    DSAFLG1,DSA@LPAA        set loaded indicator
+*
+         TM    ZEVTFLG2,ZEVT@TRC       TRC=ON?
+         BZ    ZDYNXIT                 no, exit
+         ZWTO  MID=ZEMF09I,                                            +
+               V1=ZEVTSUBN,V2==CL8'&SERVER'
+*
+ZDYNXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Dynamic-LPA ADD/DELETE serialization                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+CSVENQ   ENQ   (CSVMAJ,CSVMIN,E,8,SYSTEM),RET=HAVE,LINKAGE=SYSTEM,MF=L
+CSVENQL  EQU   *-CSVENQ
+         DS    0F
+CSVDEQ   DEQ   (CSVMAJ,CSVMIN,8,SYSTEM),LINKAGE=SYSTEM,MF=L
+CSVDEQL  EQU   *-CSVDEQ
+         DS    0C
+CSVMAJ   DC    CL8'SYSZCSV'            Major name
+CSVMIN   DC    CL8'CSVDYLPA'           Minor name
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+LMODDCT  DC    F'1'                    module delete count
+LMODACT  DC    F'1'                    module fetch count
+LRSN401  DC    XL4'00000401'           CSVDYLPA reason code
+         DS    0C
+LNKLST   DC    CL8'LNKLST'             fetch module from LNKLST
+LMODREQ  DC    CL16'EMF&REL.ZEMFINI'   requestor ID
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        CRTOKEN                                             */
+*/*                                                                  */
+*/* Function:    Create subsystem server token subroutine            */
+*/*                                                                  */
+*/* Input Regs:  R9  SSCT address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  ZTKN address                                    */
+*/*              R9  SSCT address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+CRTOKEN  ZMACS GEN=SUBENTY             entry
+         USING SSCT,R9
+         USING ZEVT,R11
+         LA    R5,DSATOKEN             ZTKN workarea
+         USING ZTKN,R5
+*
+**       Delete subsystem server token
+*
+         USING PSA,0
+         L     R3,FLCCVT
+         USING CVT,R3
+         MVC   ZTKNNAME,=CL16'&TOKEN'  token name
+         MVC   ZTKNSUBN,SSCTSNAM       complete token name
+         L     R15,CVTCSRT             CSR table
+         L     R15,X'014'(,R15)        Name/Token vector
+         L     R15,X'00C'(,R15)        IEANTDL
+         CALL  (R15),(ZCRLEVEL,ZTKNNAME,DSARC),MF=(E,DSAPLST)
+         CLC   DSARC,=AL4(IEANT_OK)    successful?
+         BE    CRTK010                 yes
+         CLC   DSARC,=AL4(IEANT_NOT_FOUND)
+         BE    CRTK010                 yes
+*
+         ZWTO  MID=ZEMF30E,                                            +
+               V1=ZTKNNAME,            token name                      +
+               V2==CL8'delete',        function                        +
+               V3=DSARC                RC
+         B     CRTKEXIT                exit
+*
+**       Create subsystem token
+*
+CRTK010  DS    0H
+         MVC   ZTKNNAME,=CL16'&TOKEN'  token name
+         MVC   ZTKNSUBN,SSCTSNAM       complete token name
+         MVC   ZTKNSSCT,ZEVTSSCT       init SSCT
+         MVC   ZTKNZEVT,ZEVTZEVT       init ZEVT
+         MVC   ZTKNLPTK,ZEVTLPTK       ZEMFSRV delete token
+         L     R15,CVTCSRT             CSR table
+         L     R15,X'014'(,R15)        Name/Token vector
+         L     R15,X'004'(,R15)        IEANTCR
+         CALL  (R15),(ZCRLEVEL,ZTKNNAME,ZTKNDATA,ZCRPERST,DSARC),      +
+               MF=(E,DSAPLST)
+         CLC   DSARC,=AL4(IEANT_OK)    successful?
+         BNE   CRTK020                 no
+         MVC   ZEVTPRTK,ZTKNNAME       journal token name
+         B     CRTKEXIT                exit
+*
+CRTK020  DS    0H
+         ZWTO  MID=ZEMF30E,                                            +
+               V1=ZTKNNAME,            token name                      +
+               V2==CL8'create',        function                        +
+               V3=DSARC                RC
+*
+CRTKEXIT DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ZCRPERST DC    AL4(IEANT_PERSIST)
+ZCRLEVEL DC    AL4(IEANT_SYSTEM_LEVEL)
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        RTTOKEN                                             */
+*/*                                                                  */
+*/* Function:    Retrieve subsystem server token subroutine          */
+*/*                                                                  */
+*/* Input Regs:  R9  SSCT address                                    */
+*/*              R11 Local ZEVT address                              */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  ZTKN address                                    */
+*/*              R9  SSCT address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 Local ZEVT address                              */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+RTTOKEN  ZMACS GEN=SUBENTY             entry
+         USING SSCT,R9
+         USING ZEVT,R11
+         LA    R5,DSATOKEN             token workarea
+         USING ZTKN,R5
+*
+         USING PSA,0
+         L     R3,FLCCVT
+         USING CVT,R3
+         L     R15,CVTCSRT             CSR table
+         L     R15,X'014'(,R15)        Name/Token vector
+         L     R15,X'008'(,R15)        IEANTRT
+         MVC   ZTKNNAME,=CL16'&TOKEN'  token name
+         MVC   ZTKNSUBN,SSCTSNAM       complete token name
+*
+         CALL  (R15),(ZRTLEVEL,ZTKNNAME,ZTKNDATA,DSARC),               +
+               MF=(E,DSAPLST)
+         CLC   DSARC,=AL4(IEANT_OK)
+         BE    RTTKEXIT
+         CLC   DSARC,=AL4(IEANT_NOT_FOUND)
+         BE    RTTKEXIT
+*
+         ZWTO  MID=ZEMF30E,                                            +
+               V1=ZTKNNAME,            token name                      +
+               V2==CL8'retrieve',      function                        +
+               V3=DSARC                RC
+*
+RTTKEXIT DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ZRTLEVEL DC    AL4(IEANT_SYSTEM_LEVEL)
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        PARINI                                              */
+*/*                                                                  */
+*/* Function:    Parse INITPARM parameters subroutine                */
+*/*                                                                  */
+*/* Input Regs:  R9  SSCT address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R8  JSIPL address                                   */
+*/*              R9  SSCT address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+PARINI   ZMACS GEN=SUBENTY             entry
+         USING SSCT,R9
+         USING ZEVT,R11
+         ZTRCE INI=0,LINKAGE=LOCAL     trace
+*
+**       Copy INITPARM parameters
+*
+         L     R8,DSAJSIPL             JSIPL
+         USING JSIPL,R8
+         MVC   ZEVTCONS,JSICNAME       init console name
+         MVI   ZEVTPARM,BLANK          scrub parm workarea
+         MVC   ZEVTPARM+1(ZEVT@PLN-1),ZEVTPARM
+         XR    R2,R2
+         ICM   R2,1,JSILGTPR           INITPARM length?
+         BNZ   PAR0010                 yes
+         OI    ZEVTFLG1,ZEVT@DEF       no
+         ZTRCE INI=1,LINKAGE=LOCAL     trace
+         B     PAR0999                 exit
+*
+PAR0010  DS    0H
+         L     R3,JSIADRPR             INITPARM
+         BCTR  R2,0
+         EX    R2,COPYPRM              copy INITPARM
+         OC    ZEVTPARM,ZEVTBLKS       uppercase INITPARM
+*
+**       Parse TRC= parameter
+*
+PAR0020  DS    0H
+         LA    R2,ZEVT@PLN             parm data length
+         LA    R3,ZEVTPARM             parm data address
+*
+PAR0030  DS    0H
+         CLC   TRCID,0(R3)             TRC=?
+         BE    PAR0040                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,PAR0030              loop
+         NI    ZEVTFLG2,XFF-ZEVT@TRC   TRC=OFF default
+         B     PAR0050                 carry on
+*
+PAR0040  DS    0H
+         LA    R3,L'TRCID(,R3)         skip keyword
+         NI    ZEVTFLG2,XFF-ZEVT@TRC   assume TRC=OFF
+         CLC   0(3,R3),=CL3'OFF'
+         BE    PAR0050
+         OI    ZEVTFLG2,ZEVT@TRC       assume TRC=ON
+         CLC   0(2,R3),=CL2'ON'
+         BE    PAR0050
+         MVC   DSARC,=AL4(RC8)         fail RC
+         MVC   DSARSN,=AL4(RSN72)      fail RSN
+         ZWTO  MID=ZEMF06E,V1==CL3'TRC'
+         ZTRCE INI=2,LINKAGE=LOCAL     trace
+         B     PAREXIT                 exit
+*
+**       Parse DBG= parameter
+*
+PAR0050  DS    0H
+         LA    R2,ZEVT@PLN             parm data length
+         LA    R3,ZEVTPARM             parm data address
+*
+PAR0060  DS    0H
+         CLC   DBGID,0(R3)             DBG=?
+         BE    PAR0070                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,PAR0060              loop
+         NI    ZEVTFLG2,XFF-ZEVT@DBG   DBG=OFF default
+         B     PAR0080                 carry on
+*
+PAR0070  DS    0H
+         LA    R3,L'DBGID(,R3)         skip keyword
+         NI    ZEVTFLG2,XFF-ZEVT@DBG   assume DBG=OFF
+         CLC   0(3,R3),=CL3'OFF'
+         BE    PAR0080
+         OI    ZEVTFLG2,ZEVT@DBG       assume DBG=ON
+         CLC   0(2,R3),=CL2'ON'
+         BE    PAR0080
+         MVC   DSARC,=AL4(RC8)         fail RC
+         MVC   DSARSN,=AL4(RSN72)      fail RSN
+         ZWTO  MID=ZEMF06E,V1==CL3'DBG'
+         ZTRCE INI=2,LINKAGE=LOCAL     trace
+         B     PAREXIT                 exit
+*
+**       Parse RCV= parameter
+*
+PAR0080  DS    0H
+         LA    R2,ZEVT@PLN             parm data length
+         LA    R3,ZEVTPARM             parm data address
+*
+PAR0090  DS    0H
+         CLC   RCVID,0(R3)             RCV=?
+         BE    PAR0095                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,PAR0090              loop
+         OI    ZEVTFLG2,ZEVT@RCV       RCV=YES default
+         B     PAR0100                 carry on
+*
+PAR0095  DS    0H
+         LA    R3,L'RCVID(,R3)         skip keyword
+         NI    ZEVTFLG2,XFF-ZEVT@RCV   assume RCV=NO
+         CLC   0(2,R3),=CL2'NO'
+         BE    PAR0100
+         OI    ZEVTFLG2,ZEVT@RCV       assume RCV=YES?
+         CLC   0(3,R3),=CL3'YES'
+         BE    PAR0100
+         MVC   DSARC,=AL4(RC8)         fail RC
+         MVC   DSARSN,=AL4(RSN72)      fail RSN
+         ZWTO  MID=ZEMF06E,V1==CL3'RCV'
+         ZTRCE INI=2,LINKAGE=LOCAL     trace
+         B     PAREXIT                 exit
+*
+**       Parse SAF= parameter
+*
+PAR0100  DS    0H
+         LA    R2,ZEVT@PLN             parm data length
+         LA    R3,ZEVTPARM             parm data address
+*
+PAR0110  DS    0H
+         CLC   SAFNO,0(R3)             SAF=NO?
+         BE    PAR0120                 yes
+         CLC   SAFYES,0(R3)            SAF=YES?
+         BE    PAR0130                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,PAR0110              loop
+*
+PAR0120  DS    0H
+         MVC   ZEVTCLAS,NONE           SAF=NO default
+         NI    ZEVTFLG2,XFF-ZEVT@SAF   SAF=NO default
+         B     PAR0200                 carry on
+*
+PAR0130  DS    0H
+         MVC   ZEVTCLAS,=CL8'&ZEMFCLS' SAF=$ZEMFCLS class
+         OI    ZEVTFLG2,ZEVT@SAF       SAF class specified
+         ZWTO  MID=ZEMF02I,V1=ZEVTCLAS
+         ZTRCE INI=4,LINKAGE=LOCAL     trace
+*
+**       Parse LIB= parameter
+*
+PAR0200  DS    0H
+         LA    R2,ZEVT@PLN             parm data length
+         LA    R3,ZEVTPARM             parm data address
+*
+PAR0210  DS    0H
+         CLC   LIBID,0(R3)             LIB=?
+         BE    PAR0220                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,PAR0210              loop
+         ZTRCE INI=5,LINKAGE=LOCAL     trace
+         B     PAR0300
+*
+PAR0220  DS    0H
+         LA    R3,L'LIBID(,R3)         skip keyword
+         LR    R4,R3                   copy address
+         LA    R2,44                   loop value
+*
+PAR0230  DS    0H
+         CLI   0(R3),BLANK             DSName end?
+         BE    PAR0240                 yes
+         CLI   0(R3),COMMA             DSName end?
+         BE    PAR0240                 yes
+         CLI   0(R3),XZERO             DSName end?
+         BE    PAR0240                 yes
+         LA    R3,1(,R3)               walk thru DSName
+         BCT   R2,PAR0230              loop
+*
+PAR0240  DS    0H
+         CLR   R3,R4                   DSName supplied?
+         BE    PAR0250                 no
+         MVC   ZEVTPLIB,ZEVTBLKS       scrub DSName
+         SLR   R3,R4                   compute DSName length
+         BCTR  R3,0
+         EX    R3,COPYLIB              copy DSName
+         OI    ZEVTFLG2,ZEVT@LIB       set override indicator
+         B     PAR0300
+*
+PAR0250  DS    0H
+         MVC   DSARC,=AL4(RC8)         fail RC
+         ZWTO  MID=ZEMF06E,V1==CL3'LIB'
+         ZTRCE INI=6,LINKAGE=LOCAL     trace
+         B     PAREXIT                 exit
+*
+**       Parse MEM= parameter
+*
+PAR0300  DS    0H
+         LA    R2,ZEVT@PLN             parm data length
+         LA    R3,ZEVTPARM             parm data address
+*
+PAR0310  DS    0H
+         CLC   MEMID,0(R3)             MEM=?
+         BE    PAR0320                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,PAR0310              loop
+         ZTRCE INI=7,LINKAGE=LOCAL     trace
+         B     PAR0400
+*
+PAR0320  DS    0H
+         LA    R3,L'MEMID(,R3)         skip ID
+         LR    R4,R3                   copy member address
+         LA    R2,9                    loop value
+*
+PAR0330  DS    0H
+         CLI   0(R3),BLANK             member end?
+         BE    PAR0340                 yes
+         CLI   0(R3),COMMA             member end?
+         BE    PAR0340                 yes
+         CLI   0(R3),XZERO             member end?
+         BE    PAR0340                 yes
+         LA    R3,1(,R3)               walk thru name
+         BCT   R2,PAR0330              loop
+*
+PAR0340  DS    0H
+         CLR   R3,R4                   member name supplied?
+         BE    PAR0350                 no
+         MVC   ZEVTMSTR,ZEVTBLKS       scrub member name
+         SLR   R3,R4                   member name length
+         BCTR  R3,0
+         EX    R3,COPYMEM              copy member name
+         OI    ZEVTFLG2,ZEVT@MEM       set override indicator
+         B     PAR0400
+*
+PAR0350  DS    0H
+         MVC   DSARC,=AL4(RC8)         fail RC
+         ZWTO  MID=ZEMF06E,V1==CL3'MEM'
+         B     PAREXIT                 exit
+*
+**       Parse TST= parameter
+*
+PAR0400  DS    0H
+         LA    R2,ZEVT@PLN             parm data length
+         LA    R3,ZEVTPARM             parm data address
+*
+PAR0410  DS    0H
+         CLC   TSTID,0(R3)             TST=?
+         BE    PAR0420                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,PAR0410              loop
+         NI    ZEVTFLG2,XFF-ZEVT@TST   TST=NO default
+         B     PAR0999                 exit
+*
+PAR0420  DS    0H
+         NI    ZEVTFLG2,XFF-ZEVT@TST   TST=NO default
+         LA    R3,L'TSTID(,R3)         skip keyword
+         CLC   0(2,R3),=CL2'NO'        TST=NO?
+         BE    PAR0999                 yes, exit
+         OI    ZEVTFLG2,ZEVT@TST       set TST=YES
+         LR    R4,R3                   copy address
+         LA    R2,9                    loop value
+*
+PAR0430  DS    0H
+         CLI   0(R3),BLANK             exit name end?
+         BE    PAR0440                 yes
+         CLI   0(R3),COMMA             exit name end?
+         BE    PAR0440                 yes
+         CLI   0(R3),XZERO             exit name end?
+         BE    PAR0440                 yes
+         LA    R3,1(,R3)               walk thru exit name
+         BCT   R2,PAR0430              loop
+*
+PAR0440  DS    0H
+         CLR   R3,R4                   exit name supplied?
+         BE    PAR0450                 no
+         MVC   ZEVTEXIT,ZEVTBLKS       scrub exit name
+         SLR   R3,R4                   exit name length
+         BCTR  R3,0
+         EX    R3,COPYXIT              copy exit name
+         TM    ZEVTFLG1,ZEVT@DEF       INITPARMs specified?
+         BNZ   PAR0999                 yes
+         OI    ZEVTFLG2,ZEVT@DBG       set DBG=ON
+         OI    ZEVTFLG2,ZEVT@TRC       set TRC=ON
+         OI    ZEVTFLG2,ZEVT@RCV       SET RCV=YES
+         B     PAR0999                 exit
+*
+PAR0450  DS    0H
+         MVC   DSARC,=AL4(RC8)         fail RC
+         ZWTO  MID=ZEMF06E,V1==CL3'TST'
+         ZTRCE INI=2,LINKAGE=LOCAL     trace
+         B     PAREXIT                 exit
+*
+PAR0999  DS    0H
+         XC    DSARC,DSARC             set RC
+         XC    DSARSN,DSARSN           set RSN
+         ZTRCE INI=8,LINKAGE=LOCAL     trace
+*
+PAREXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYSAF  MVC   DSAWORKA(*-*),0(R1)
+COPYPRM  MVC   ZEVTPARM(*-*),0(R3)
+COPYLIB  MVC   ZEVTPLIB(*-*),0(R4)
+COPYMEM  MVC   ZEVTMSTR(*-*),0(R4)
+COPYXIT  MVC   ZEVTEXIT(*-*),0(R4)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+LIBID    DC    CL4'LIB='               INITPARM
+MEMID    DC    CL4'MEM='               INITPARM
+DBGID    DC    CL4'DBG='               INITPARM
+TRCID    DC    CL4'TRC='               INITPARM
+RCVID    DC    CL4'RCV='               INITPARM
+TSTID    DC    CL4'TST='               INITPARM
+SSIID    DC    CL4'SSI='               INITPARM
+*
+NONE     DC    CL8'NONE'               INITPARM
+SAFNO    DC    CL6'SAF=NO'             INITPARM
+SAFYES   DC    CL7'SAF=YES'            INITPARM
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        PREDEL                                              */
+*/*                                                                  */
+*/* Function:    Release previous instance resources subroutine      */
+*/*                                                                  */
+*/* Input Regs:  R9  SSCT address                                    */
+*/*              R11 Current ZEVT address                            */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R9  SSCT address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 Previous ZEVT address                           */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+PREDEL   ZMACS GEN=SUBENTY             entry
+         USING SSCT,R9
+         ST    R11,DSACZEVT            save current ZEVT
+*
+**       Validity check previous instance ZEVT
+*
+         ICM   R11,15,DSAPZEVT         ZEVT
+         BZ    PREDXIT                 no
+         USING ZEVT,R11
+         CLC   ZEVTID,=CL4'ZEVT'       valid?
+         BNE   PREDXIT                 no
+         ICM   R3,15,ZEVTSIZE          size init?
+         BZ    PREDXIT                 no
+         OI    DSAFLG1,DSA@PRES        set indicator
+*
+**       Copy previous instance pointers
+*
+         MVC   DSAZZXQE,ZEVTZXQE       copy ZXQE CPID
+         MVC   DSAZZEXT,ZEVTZEXT       copy ZEXT CPID
+         MVC   DSAMSTEA,ZEVTMSTE       copy MSTE table address
+         MVC   DSAMSTEL,ZEVTMSEL       copy MSTE table size
+*
+**       Release previous instance read/write ZEVT
+*
+         STORAGE RELEASE,COND=YES,                                     +
+               ADDR=(R11),LENGTH=(R3),SP=&SP245,LINKAGE=SYSTEM
+         XC    DSAPZEVT,DSAPZEVT       zero previous ZEVT
+         L     R11,DSACZEVT            restore current ZEVT
+*
+**       Delete previous instance ZXQE cell pool
+*
+         ICM   R3,15,DSAZZXQE          CPID init?
+         BZ    PRED010                 no
+         XC    DSAZZXQE,DSAZZXQE       clear CPID
+         CPOOL DELETE,CPID=(R3),LINKAGE=SYSTEM
+*
+**       Delete previous instance ZEXT cell pool
+*
+PRED010  DS    0H
+         ICM   R3,15,DSAZZEXT          CPID init?
+         BZ    PRED020                 no
+         XC    DSAZZEXT,DSAZZEXT       clear CPID
+         CPOOL DELETE,CPID=(R3),LINKAGE=SYSTEM
+*
+**       Storage release previous MSTE instance
+*
+PRED020  DS    0H
+         ICM   R2,15,DSAMSTEA          MSTE init?
+         BZ    PRED099                 no
+         ICM   R3,15,DSAMSTEL          MSTE size init?
+         BZ    PRED099                 no
+         STORAGE RELEASE,COND=YES,                                     +
+               ADDR=(R2),LENGTH=(R3),SP=&SP245,LINKAGE=SYSTEM
+         XC    DSAMSTEA,DSAMSTEA       zero MSTE table address
+*
+**       issue previous instance resources released msg
+*
+PRED099  DS    0H
+         TM    DSAFLG1,DSA@PRES        previous instance released?
+         BZ    PREDXIT                 no
+         ZWTO  MID=ZEMF08I,V1=SSCTSNAM yes
+*
+PREDXIT  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        READMEM                                             */
+*/*                                                                  */
+*/* Function:    Read PARMLIB member subroutine                      */
+*/*                                                                  */
+*/* Input Regs:  R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R6  DCB  address                                    */
+*/*              R7  ZREC address                                    */
+*/*              R8  ZIO  address                                    */
+*/*              R9  EODAD address                                   */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+READMEM  ZMACS GEN=SUBENTY             entry
+         USING ZEVT,R11
+*
+**       Set AMODE=24 EODAD address
+*
+         L     R8,DSAZIOA              ZIO
+         USING ZIO,R8
+         LA    R9,READEOD              AMODE=24 EODAD
+         MVC   ZIOBRR9,=XL2'07F9'      R9: EODAD return
+*
+**       Allocate PARMLIB dataset
+*
+         LA    R3,DSADABWA             DAB
+         USING DAB,R3
+         XC    DAB(DAB@CLER),DAB       scrub DAB
+         MVC   DABID,=CL4'DAB'         ID
+         MVC   DABDDNAM,ZEVTPDDN       DDname
+         MVC   DABDSNAM,ZEVTPLIB       DSName
+         MVC   DABMEMBR,DSAXTMEM       exit member name
+         OI    DABFCID,DAB@ALLO        service ID
+         OI    DABFLG1,DAB@DDNM        DDname supplied
+         OI    DABFLG1,DAB@DSNM        DSName supplied
+         OI    DABFLG1,DAB@AMEM        Member supplied
+         ZCALL SRV=ZEVTALLO,(R3)       ALLOC EPA
+         DROP  R3
+         ST    R15,DSARC               RC
+         ST    R0,DSARSN               RSN
+         LTR   R15,R15                 successful?
+         BZ    READ010                 yes
+*
+**       Dynamic allocation failed
+*
+         ZWTO  MID=ZEMF27E,                                            +
+               V1==CL8'ALLOC',         request                         +
+               V2=ZEVTPDDN,            DDname                          +
+               V3=DSAXTMEM,            member name                     +
+               V4=ZEVTPLIB             PARMLIB
+         B     READEXIT                exit
+*
+**       Open PARMLIB dataset
+*
+READ010  DS    0H
+         LA    R6,ZIODCB               DCB
+         USING IHADCB,R6
+         MVC   DCBDDNAM,ZEVTPDDN       DDname
+         LA    R3,ZIOEODA
+         STCM  R3,7,DCBEODA            EODAD
+         OPEN  ((R6),INPUT),MODE=31,MF=(E,ZIOOLFM)
+         OI    DSAFLG1,DSA@XOPN        open indicator
+         TM    DCBOFLGS,DCBOFOPN       successful?
+         BNZ   READ020                 yes
+         NI    DSAFLG1,XFF-DSA@XOPN    reset open indicator
+*
+**       PARMLIB dataset open failed
+*
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN8)       RSN
+         ZWTO  MID=ZEMF24E,                                            +
+               V1=ZEVTPDDN,            DDname                          +
+               V2=DSAXTMEM,            member name                     +
+               V3=DSARC,               RC                              +
+               V4=DSARSN               RSN
+         B     READEXIT                exit
+*
+**       Read exit member records
+*
+READ020  DS    0H
+         LA    R4,ZREC@NUM             ZREC entries
+         L     R7,DSAZRECA             ZREC table address
+         USING ZREC,R7
+         LR    R0,R7
+         L     R1,=AL4(ZREC@MAX)       ZREC table size
+         L     R15,ZEVTX40S            x'40'
+         MVCL  R0,R14                  scrub
+         LA    R5,0                    record count
+         ST    R5,DSAZRECC             set record count
+*
+READ030  DS    0H
+         GET   (R6),ZIORECOR
+         OC    ZIORECOR,ZEVTBLKS
+         CLI   ZIORECOR,COMMENT        comment?
+         BE    READ030                 yes, loop
+         CLI   ZIORECOR,BLANK          continuation record?
+         BE    READ040                 yes
+         LTR   R5,R5                   first record?
+         BZ    READ050                 yes
+         MVC   ZRECSEQN,ZEVTSEQN       sequence number
+         MVC   ZRECORD(L'ZEVTENDR),ZEVTENDR
+         LA    R5,1(,R5)               update record count
+         BCTR  R4,0
+         LA    R7,ZREC@SZE(,R7)        next ZREC entry
+*
+READ040  DS    0H
+         LTR   R5,R5                   first record read?
+         BNZ   READ050                 yes
+         MVC   DSAERROR,ZIORECOR       invalid record
+         B     READERR                 error
+*
+READ050  DS    0H
+         MVC   ZRECORD,ZIORECOR        copy record
+         LA    R5,1(,R5)               update record count
+         XC    DSARC,DSARC             RC
+         LA    R7,ZREC@SZE(,R7)        next ZREC entry
+         BCT   R4,READ030              loop
+*
+**       ZREC table overflow error
+*
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN320)     RSN
+         ZWTO  MID=ZEMF32E,                                            +
+               V1==CL4'ZREC',          table name                      +
+               V2=DSARC,               RC                              +
+               V3=DSARSN               RSN
+*
+**       EODAD exit routine
+*
+READEOD  DS    0H
+         MVC   DSAERROR,=CL16'NULL'
+         LTR   R5,R5                   any records?
+         BZ    READERR                 no
+         MVC   ZRECSEQN,ZEVTSEQN       sequence number
+         MVC   ZRECORD(L'ZEVTENDR),ZEVTENDR
+         LA    R5,1(,R5)               add one
+         LA    R7,ZREC@SZE(,R7)        next ZREC entry
+         MVC   ZRECSEQN,ZEVTSEQN       sequence number
+         MVC   ZRECORD(L'ZEVTFINR),ZEVTFINR
+         LA    R5,1(,R5)               add one
+         ST    R5,DSAZRECC             update record count
+         DROP  R7
+         L     R7,DSAZRECA             ZREC table address
+         USING ZREC,R7
+         SL    R7,=AL4(ZREC@PFL)       ZREC prefix
+         USING ZRECPFX,R7
+         MVC   ZRECFRST,DSAZRECA       first record address
+         MVC   ZRECCURR,DSAZRECA       current record address
+         MVC   ZRECENTY,DSAZRECC       record count
+         B     READCLS                 close PARMLIB
+         DROP  R7
+*
+**       Error exit routine
+*
+READERR  DS    0H
+         ZWTO  MID=ZEMF31E,                                            +
+               V1=ZEVTPDDN,            DDname                          +
+               V2=DSAXTMEM,            member name                     +
+               V3=DSAERROR             record data
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN44)      RSN
+*
+**       Close PARMLIB dataset
+*
+READCLS  DS    0H
+         TM    DSAFLG1,DSA@XOPN        opened?
+         BZ    READDAL                 no
+         CLOSE ((R6)),MODE=31,MF=(E,ZIOCLFM)
+         FREEPOOL (R6)
+         NI    DSAFLG1,XFF-DSA@XOPN    closed
+*
+**       Deallocate PARMLIB dataset
+*
+READDAL  DS    0H
+         LA    R3,DSADABWA             DAB address
+         USING DAB,R3
+         XC    DAB(DAB@CLER),DAB       scrub DAB
+         MVC   DABID,=CL4'DAB'         ID
+         MVC   DABDDNAM,ZEVTPDDN       init DDname
+         OI    DABFCID,DAB@DEAL        service ID
+         OI    DABFLG1,DAB@DDNM        DDname deallocation
+         ZCALL SRV=ZEVTDEAL,(R3)       DEALLOC EPA
+         DROP  R3
+*
+**       Exit routine
+*
+READEXIT DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        GETMSTR                                             */
+*/*                                                                  */
+*/* Function:    Parse master PARMLIB member subroutine              */
+*/*                                                                  */
+*/* Input Regs:  R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  MSTR address                                    */
+*/*              R8  ZREC address                                    */
+*/*              R9  ZPAR address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+GETMSTR  ZMACS GEN=SUBENTY             entry
+         USING ZEVT,R11
+*
+**       Clear ZPAR parameter data
+*
+GETM000  DS    0H
+         L     R9,DSAZPARA             ZPAR
+         USING ZPAR,R9
+         LA    R0,ZPARDATA             parmdata address
+         LA    R1,ZPAR@DTL             parmdata length
+         L     R15,ZEVTX40S            x'40'
+         MVCL  R0,R14                  scrub
+*
+**       Extract master member exit data
+*
+         L     R8,DSAZRECA             ZREC table address
+         USING ZREC,R8
+         SL    R8,=AL4(ZREC@PFL)       ZREC prefix
+         USING ZRECPFX,R8
+         CLC   ZRECPFXI,=CL4'ZREC'     ZREC?
+         BE    GETM010                 yes
+         MVC   DSARSN,=AL4(RSN424)     RSN
+         ZWTO  MID=ZEMF26E,PLIST=DSAPLST,                              +
+               V1==CL4'ZREC',V2=DSARC,V3=DSARSN
+         B     GETMXIT                 exit
+*
+GETM010  DS    0H
+         L     R5,ZRECCURR             current record
+         USING ZREC,R5
+         MVC   DSAERROR,0(R5)          RID
+         CLC   ZRECORD(8),=C'ADDEXIT(' ADDEXIT?
+         BE    GETM020                 no, loop
+         MVC   DSARSN,=AL4(RSN428)     RSN
+         B     GETMERR                 error
+*
+**       Locate master member END record
+*
+GETM020  DS    0H
+         L     R4,ZRECENTY             # of records
+         L     R5,ZRECCURR             current record
+         MVC   DSAERROR,0(R5)          RID
+*
+GETM030  DS    0H
+         CLC   ZEVTENDR,ZRECORD        END record?
+         BE    GETM040                 yes
+         LA    R5,ZREC@SZE(,R5)        next record
+         BCT   R4,GETM030              find end record
+         MVC   DSARSN,=AL4(RSN432)     RSN
+         B     GETMERR                 error
+*
+GETM040  DS    0H
+         L     R3,ZRECCURR             current record
+         SLR   R5,R3                   total record length
+         CL    R5,=AL4(ZPAR@DTL)       overflows ZPAR?
+         BL    GETM050                 no
+         MVC   DSARSN,=AL4(RSN436)     RSN
+         ZWTO  MID=ZEMF32E,PLIST=DSAPLST,                              +
+               V1==CL4'ZPAR',V2=DSARC,V3=DSARSN
+         B     GETMXIT                 exit
+*
+**       Create master member ZPAR entry
+*
+GETM050  DS    0H
+         L     R9,DSAZPARA             ZPAR address
+         L     R5,ZRECCURR             current record
+         LA    R2,ZPARDATA             ZPAR
+         MVC   DSAERROR,0(R5)          RID
+*
+GETM060  DS    0H
+         CLC   ZEVTENDR,ZRECORD        END record
+         BE    GETM100                 yes
+         LA    R4,ZRECORD              record address
+         LA    R3,ZREC@DTZ             record length
+*
+GETM080  DS    0H
+         CLC   =CL2',',0(R4)           end of parm?
+         BE    GETM090                 yes
+         CLC   =CL2')',0(R4)           end of parm?
+         BE    GETM090                 yes
+         LA    R4,1(,R4)               walk thru parm
+         BCT   R3,GETM080
+         MVC   DSAERROR,ZRECORD        RID
+         MVC   DSARSN,=AL4(RSN440)     RSN
+         B     GETMERR                 error
+*
+GETM090  DS    0H
+         LA    R4,1(,R4)               add separator
+         LA    R3,ZRECORD              record address
+         SLR   R4,R3                   parm string length
+         BCTR  R4,0
+         EX    R4,COPYPAR              copy parm string
+         LA    R2,1(R4,R2)             next parm string address
+         LA    R5,ZREC@SZE(,R5)        next record
+         B     GETM060                 loop
+*
+**       Update current ZPAR entry
+*
+GETM100  DS    0H
+         MVC   DSAERROR,0(R5)          RID
+         LA    R5,ZREC@SZE(,R5)        next record
+         ST    R5,ZRECCURR             set next record address
+         L     R3,DSAZPARA             ZPAR address
+         LA    R2,ZPAR@DTL-2           ZPAR table size
+*
+GETM110  DS    0H
+         CLC   =CL2')',0(R3)           close paren found
+         BE    GETM120                 yes
+         LA    R3,1(,R3)               walk thru ZPAR data
+         BCT   R2,GETM110              loop
+         MVC   DSARSN,=AL4(RSN444)     RSN
+         B     GETMERR                 error
+*
+GETM120  DS    0H
+         LA    R3,2(,R3)               add one
+         LA    R4,ZPARDATA             ZPAR data address
+         SLR   R3,R4                   compute ZPAR length
+         ST    R3,ZPARLEN              set ZPAR length
+*
+**       Call master member parse routine
+*
+         ZCALL SR=MSTRPAR
+         CLC   DSARC,=AL4(RC0)         successful?
+         BNE   GETMXIT                 no
+*
+**       Process next master member section
+*
+         L     R5,ZRECCURR             next record address
+         CLC   ZRECORD(L'ZEVTFINR),ZEVTFINR more records?
+         BNE   GETM000                 yes, loop
+         B     GETM999                 no, exit
+*
+GETMERR  DS    0H
+         ZWTO  MID=ZEMF33E,PLIST=DSAPLST,                              +
+               V1==CL4'ZREC',V2=ZEVTMSTR,V3=DSAERROR,V4=DSARSN
+         B     GETMXIT                 exit
+*
+GETM999  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+GETMXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYPAR  MVC   0(*-*,R2),ZRECORD
+         DS    0H
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        MSTRPAR                                             */
+*/*                                                                  */
+*/* Function:    Parse master PARMLIB member nested-routine          */
+*/*                                                                  */
+*/* Input Regs:  R9  ZPAR address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  DYNX address                                    */
+*/*              R8  MSTR address                                    */
+*/*              R9  ZPAR address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+MSTRPAR  ZMACS GEN=SUBENTY,SUBSAVE=DSANSSA
+         USING ZPAR,R9
+         USING ZEVT,R11
+*
+**       Set MSTR table addressability
+*
+         L     R8,DSAMSTRN             current MSTR entry
+         USING MSTR,R8
+*
+**       Parse ADDEXIT keywords
+*
+         L     R2,ZPARLEN              parmdata length
+         LA    R3,ZPARDATA             parmdata address
+         MVC   MSTRID,=CL4'MSTR'       ID entry
+*
+MSTR100  DS    0H
+         CLC   ADDEXIT,0(R3)           ADDEXIT=?
+         BE    MSTR110                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR100              loop
+         MVC   DSAERROR,ZPARDATA       ID error
+         B     MSTRERR                 exit
+*
+MSTR110  DS    0H
+         LA    R3,L'ADDEXIT(,R3)       skip keyword
+         LR    R1,R3                   copy address
+         LA    R2,9                    data loop value
+*
+MSTR120  DS    0H
+         CLI   0(R3),BLANK             exit name end?
+         BE    MSTR130                 yes
+         CLI   0(R3),COMMA             exit name end?
+         BE    MSTR130                 yes
+         LA    R3,1(,R3)               walk thru record
+         BCT   R2,MSTR120              loop
+         MVC   DSAERROR,ZPARDATA       ID record
+         B     MSTRERR                 error exit
+*
+MSTR130  DS    0H
+         SLR   R3,R1                   valid exit name?
+         BNZ   MSTR140                 yes
+         MVC   DSAERROR,ZPARDATA       ID record
+         B     MSTRERR                 error exit
+*
+MSTR140  DS    0H
+         MVC   MSTRNAME,ZEVTBLKS       scrub name field
+         BCTR  R3,0
+         EX    R3,COPYEXIT             copy SMF exit name
+         L     R7,=A(ZDYNTBLE)         DYNX table address
+         USING DYNX,R7
+         LA    R5,ZDYNTABE             number of entries
+*
+MSTR150  DS    0H
+         CLC   DYNEXTNM,MSTRNAME       exit name match?
+         BE    MSTR160                 yes
+         LA    R7,DYN@SIZE(,R7)        next entry
+         BCT   R5,MSTR150              loop
+         MVC   DSAXNAME,MSTRNAME       save exit name
+         MVC   MSTR(MSTR@SZE),ZEVTBLKS clear MSTR entry
+*
+**       Issue unsupported exit warning msg
+*
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN420)     RSN
+         ZWTO  MID=ZEMF35W,                                            +
+               V1=ZEVTMSTR,            master member                   +
+               V2=DSAXNAME,            exit name                       +
+               V3=DSARC,               RC                              +
+               V4=DSARSN               RSN
+         XC    DSARC,DSARC             reset RC
+         XC    DSARSN,DSARSN           reset RSN
+         B     MSTRXIT                 exit
+*
+MSTR160  DS    0H
+         MVC   MSTRDYNM,DYNDYNAM       SYS dynamic exit name
+         MVC   MSTREXIT,DYNMODNM       ZEMF SYS exit module name
+*
+**       Parse STATE= keyword
+*
+MSTR200  DS    0H
+         L     R2,ZPARLEN              parmdata length
+         LA    R3,ZPARDATA             parmdata address
+         XC    MSTRSTAT,MSTRSTAT       scrub stata field
+*
+MSTR210  DS    0H
+         CLC   STATE,0(R3)             STATE=?
+         BE    MSTR220                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR210              loop
+         MVI   MSTRSTAT,MSTR@NAC       set STATE=INACTIVE default
+         B     MSTR300
+*
+MSTR220  DS    0H
+         LA    R3,L'STATE(,R3)         skip keyword
+*
+MSTR230  DS    0H
+         CLC   =CL8'INACTIVE',0(R3)    INACTIVE?
+         BNE   MSTR240                 no
+         MVI   MSTRSTAT,MSTR@NAC       STATE=INACTIVE
+         B     MSTR300
+*
+MSTR240  DS    0H
+         CLC   =CL6'ACTIVE',0(R3)      ACTIVE?
+         BE    MSTR250                 no
+         MVC   DSAERROR,ZPARDATA       ID record
+         B     MSTRERR                 error exit
+*
+MSTR250  DS    0H
+         MVI   MSTRSTAT,MSTR@ACT       STATE=ACTIVE
+*
+**       Parse POS= keyword
+*
+MSTR300  DS    0H
+         L     R2,ZPARLEN              parmdata length
+         LA    R3,ZPARDATA             parmdata address
+         XC    MSTRPOS,MSTRPOS         scrub position field
+*
+MSTR310  DS    0H
+         CLC   POS,0(R3)               POS=?
+         BE    MSTR320                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR310              loop
+         MVI   MSTRPOS,MSTR@1ST        set POS=FIRST default
+         B     MSTR400
+*
+MSTR320  DS    0H
+         LA    R3,L'POS(,R3)           skip keyword
+*
+MSTR330  DS    0H
+         CLC   =CL5'FIRST',0(R3)       FIRST?
+         BNE   MSTR340                 no
+         MVI   MSTRPOS,MSTR@1ST        POS=FIRST
+         B     MSTR400
+*
+MSTR340  DS    0H
+         CLC   =CL4'LAST',0(R3)        LAST?
+         BNE   MSTR350                 no
+         MVI   MSTRPOS,MSTR@LST        POS=LAST
+         B     MSTR400
+*
+MSTR350  DS    0H
+         CLC   =CL6'SYSTEM',0(R3)      SYSTEM?
+         BE    MSTR360                 yes
+         MVC   DSAERROR,ZPARDATA       ID record
+         B     MSTRERR                 error exit
+*
+MSTR360  DS    0H
+         MVI   MSTRPOS,MSTR@SYS        POS=SYSTEM
+*
+**       Parse SYS={NO|YES} keyword
+*
+MSTR400  DS    0H
+         L     R2,ZPARLEN              parmdata length
+         LA    R3,ZPARDATA             parmdata address
+         XC    MSTRSYS,MSTRSYS         scrub scope field
+*
+MSTR410  DS    0H
+         MVI   MSTRSYS,MSTR@NO         set SYS=NO default
+         CLC   SYSNO,0(R3)             SYS=NO?
+         BE    MSTR500                 yes
+         MVI   MSTRSYS,MSTR@YES        assume SYS=YES
+         CLC   SYSYES,0(R3)            SYS=YES?
+         BE    MSTR500                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR410              loop
+         MVI   MSTRSYS,MSTR@NO         set SYS=NO default
+*
+**       Parse SUBSYS= keyword
+*
+MSTR500  DS    0H
+         L     R2,ZPARLEN              parmdata length
+         LA    R3,ZPARDATA             parmdata address
+*
+MSTR510  DS    0H
+         CLC   SUBSYS,0(R3)            SUBSYS=?
+         BE    MSTR520                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR510              loop
+         XC    MSTRSCOP,MSTRSCOP       clear scope
+         CLI   MSTRSYS,MSTR@YES        SYS=YES
+         BE    MSTR700                 yes
+         MVC   DSAERROR,=CL16'SUBSYS= is null'
+         B     MSTRERR                 error exit
+*
+**       Validity check SUBSYS= list
+*
+MSTR520  DS    0H
+         MVC   DSAERROR,0(R3)          error ID
+         LA    R3,L'SUBSYS(,R3)        skip keyword
+         LR    R4,R3                   copy start address
+*
+MSTR530  DS    0H
+         CLI   0(R3),QUOTE             end quote found?
+         BE    MSTR540                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR530              loop
+         MVC   DSAERROR,=CL16'SUBSYS= no quote'
+         B     MSTRERR                 error exit
+*
+MSTR540  DS    0H
+         SLR   R3,R4                   SUBSYS string length
+         ST    R3,DSASUBLN             save SUBSYS list length
+         MVC   DSAWORKB,ZEVTBLKS       clear SUBSYS workarea
+         BCTR  R3,0
+         EX    R3,COPYSUBS             copy SUBSYS string
+*
+**       Parse STC subsystem
+*
+MSTR600  DS    0H
+         L     R2,DSASUBLN             SUBSYS string length
+         LA    R3,DSAWORKB             SUBSYS string address
+*
+MSTR610  DS    0H
+         OI    MSTRSCOP,MSTR@STC       assume STC SUBSYS
+         CLC   SYSSTC,0(R3)            STC=?
+         BE    MSTR620                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR610              loop
+         NI    MSTRSCOP,XFF-MSTR@STC   STC SUBSYS not specified
+*
+**       Parse TSO subsystem
+*
+MSTR620  DS    0H
+         L     R2,DSASUBLN             SUBSYS string length
+         LA    R3,DSAWORKB             SUBSYS string address
+*
+MSTR630  DS    0H
+         OI    MSTRSCOP,MSTR@TSO       assume TSO SUBSYS
+         CLC   SYSTSO,0(R3)            TSO=?
+         BE    MSTR640                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR630              loop
+         NI    MSTRSCOP,XFF-MSTR@TSO   TSO SUBSYS not specified
+*
+**       Parse JESn subsystem
+*
+MSTR640  DS    0H
+         L     R2,DSASUBLN             SUBSYS string length
+         LA    R3,DSAWORKB             SUBSYS string address
+*
+MSTR650  DS    0H
+         OI    MSTRSCOP,MSTR@JES       assume JESn SUBSYS
+         CLC   ZEVTJESN,0(R3)          JESn?
+         BE    MSTR660                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR650              loop
+         NI    MSTRSCOP,XFF-MSTR@JES   JESn SUBSYS not specified
+*
+**       Parse ASCH subsystem
+*
+MSTR660  DS    0H
+         L     R2,DSASUBLN             SUBSYS string length
+         LA    R3,DSAWORKB             SUBSYS string address
+*
+MSTR670  DS    0H
+         OI    MSTRSCOP,MSTR@ASC       assume ASCH SUBSYS
+         CLC   SYSASCH,0(R3)           ASCH?
+         BE    MSTR680                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR670              loop
+         NI    MSTRSCOP,XFF-MSTR@ASC   ASCH SUBSYS not specified
+*
+**       Parse OMVS subsystem
+*
+MSTR680  DS    0H
+         L     R2,DSASUBLN             SUBSYS string length
+         LA    R3,DSAWORKB             SUBSYS string address
+*
+MSTR690  DS    0H
+         OI    MSTRSCOP,MSTR@OMV       assume OMVS SUBSYS
+         CLC   SYSOMVS,0(R3)           OMVS?
+         BE    MSTR700                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MSTR690              loop
+         NI    MSTRSCOP,XFF-MSTR@OMV   OMVS SUBSYS not specified
+*
+**       Update MSTR entry count
+*
+MSTR700  DS    0H
+         L     R2,DSAMSTRC             record count
+         LA    R2,1(,R2)               add one
+         ST    R2,DSAMSTRC             update count
+         XC    DSARC,DSARC             RC
+*
+**       Update MSTR entry address
+*
+MSTR999  DS    0H
+         LA    R8,MSTR@SZE(,R8)        next MSTR entry
+         ST    R8,DSAMSTRN             set next MSTR address
+         L     R2,=AL4(MSTR@MAX)       MSTR table size
+         S     R2,=AL4(MSTR@SZE)       MSTR entry size
+         LA    R2,0(R8,R2)             last entry
+         CLR   R8,R2                   overflow?
+         BL    MSTRXIT                 no
+*
+**       Issue MSTR table overflow msg
+*
+         MVC   DSARC,=AL4(RC8)         RC
+         MVC   DSARSN,=AL4(RSN60)      RSN
+         ZWTO  MID=ZEMF32E,PLIST=DSAPLST,                              +
+               V1==CL4'MSTR',V2=DSARC,V3=DSARSN
+         B     MSTRXIT                 exit
+*
+**       Error exit routines
+*
+MSTRERR  DS    0H
+         ZWTO  MID=ZEMF31E,                                            +
+               V1=ZEVTPDDN,            DDname                          +
+               V2=ZEVTMSTR,            member name                     +
+               V3=DSAERROR             record data
+         MVC   DSARC,=AL4(RC8)         RC
+*
+**       Exit routine
+*
+MSTRXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAOPAR
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYEXIT MVC   MSTRNAME(*-*),0(R1)
+COPYSUBS MVC   DSAWORKB(*-*),0(R4)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+ADDEXIT  DC    CL8'ADDEXIT('
+POS      DC    CL4'POS='
+STATE    DC    CL6'STATE='
+SYSNO    DC    CL6'SYS=NO'
+SYSYES   DC    CL7'SYS=YES'
+SUBSYS   DC    CL8'SUBSYS='''''
+SYSSTC   DC    CL3'STC'
+SYSTSO   DC    CL3'TSO'
+SYSASCH  DC    CL4'ASCH'
+SYSOMVS  DC    CL4'OMVS'
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        Dynamic Storage Area                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+DSA      DSECT ,
+DSASAVE  DS    18F                     mainline savearea
+DSASBSA  DS    18F                     subroutine savearea
+DSANSSA  DS    18F                     nested subroutine savearea
+         DS    0X
+DSAFLG1  DS    XL1                     flags
+DSA@LENQ EQU   X'80'                   CSVDYLPA ENQ indicator
+DSA@LPAA EQU   X'40'                   ZEMFSRV ADD successful
+DSA@MOPN EQU   X'20'                   MSTR PARMLIB open indicator
+DSA@XOPN EQU   X'10'                   XMEM PARMLIB open indicator
+DSA@STAE EQU   X'08'                   ESTAEX created indicator
+DSA@PRES EQU   X'04'                   previous instance resource ind
+DSA@RSV6 EQU   X'02'                   -available
+DSA@RSV7 EQU   X'01'                   -available
+         DS    0C
+DSAFLG2  DS    XL1                     more flags
+DSALPFLG DS    XL2                     CSVDYLPA ADD/DELETE flags
+         DS    0F
+DSASSCT  DS    F                       SSCT address
+DSAJSIPL DS    F                       JSIPL address
+DSAXRC   DS    F                       SAF RC
+DSACKEY  DS    F                       protect key savearea
+DSATOKN  DS    F                       ESTAEX token
+DSACPID  DS    F                       ZXQE staging CPID
+DSACPXT  DS    F                       ZEXT staging CPID
+DSASCSR  DS    F                       SCSR address
+DSAZIOA  DS    F                       ZIO address
+DSASRVA  DS    F                       ZEMFSRV entry address
+DSACZEVT DS    F                       current instance ZEVT
+DSAPZEVT DS    F                       previous instance ZEVT
+DSAZZXQE DS    F                       ZXQE CPID
+DSAZZEXT DS    F                       ZEXT CPID
+DSAMSTRA DS    F                       MSTR table address
+DSAMSTRN DS    F                       MSTR next entry address
+DSAMSTEA DS    F                       MSTE table address
+DSAMSTEL DS    F                       MSTE table size
+DSAMSTEC DS    F                       MSTE entry count
+DSAMSTRC DS    F                       MSTR entry count
+DSAZRECA DS    F                       ZREC table address
+DSAZRECC DS    F                       ZREC entry count
+DSAZPARA DS    F                       ZPAR table address
+DSASUBLN DS    F                       SUBSYS string length
+         DS    0F
+DSAOPAR  DS    0XL12
+DSARC    DS    F                       R15 has RC
+DSARSN   DS    F                       R0 has RSN
+DSAGPR1  DS    F                       R1 output parameter
+DSAOPARZ EQU   *-DSAOPAR               keep order
+         DS    0D
+DSADWRD  DS    D                       conversion work area
+DSADWRD2 DS    D                       conversion work area
+DSAXTMEM DS    CL8                     PARMLIB exit member name
+DSAXNAME DS    CL8                     PARMLIB exit member name
+DSALPTKN DS    XL8                     ZEMFSRV delete token
+DSAPRETK DS    XL8                     ZEMFSRV previous delete token
+DSAMODNM DS    CL8                     exit name
+DSAWORKA DS    CL8                     general workarea
+DSAXITNM DS    CL16                    dynamic exit name
+DSADYLPA DS    CL(LPMED_LEN)           CSVDYLPA listform
+         DS    0F
+DSADYLST CSVDYLPA MF=(L,DYLPAL)        CSVDYLPA listform
+DSARQLPA DS    0D
+DSARQSUB DS    CL4                     -subsystem name
+DSARQREL DS    CL6                     -subsystem release level
+DSARQMOD DS    CL6                     -subsystem load module
+DSA@RQSZ EQU   *-DSARQLPA              keep it together
+         DS    0D
+DSAPREFX DS    CL8                     CPF command prefix
+DSAOWNER DS    CL8                     CPF command prefix owner
+DSACPFX  CPF   MF=(L,DSACPF)           CPF listform
+         DS    0F
+DSASCSRL DS    CL(SCSRPLST_LEN)        SCSR parmlist
+         DS    0F
+DSATOKEN DS    CL(ZTKN@SZE)            Name/Token Pair
+         DS    0F
+DSAXSAWA DS    CL(XSA@SIZE)            XSA block
+         DS    0F
+DSADABWA DS    CL(DAB@SIZE)            DAB block
+         DS    0F
+DSASCONV DS    CL(STCK@CNL)            STCKCONV listform
+         DS    0C
+DSAERROR DS    CL16                    error data
+DSAWORKB DS    CL80                    SUBSYS string
+         DS    0F
+DSAPLST  DS    XL256                   parmlist
+DSAPLSTL EQU   *-DSAPLST               parmlist size
+         DS    0D
+DSAZRWA  DS    CL(ZRWA@SZE)            ZRWA recovery workarea
+DSA@RWAZ EQU   *-DSAZRWA               keep order
+         DS    0D
+DSALOCAL DS    CL(ZEVTLOCL)            Local ZEVT
+         DS    0D
+DSA@SIZE EQU   *-DSA                   size of DSA
+*---------------------------------------------------------------------*
+*        Data Areas                                                   *
+*--------+---------+---------+---------+---------+---------+---------+*
+         ZTABS GEN=DYN,DSECT=YES
+         ZTABS GEN=KEY,DSECT=YES
+         IEFJMR ,
+         IFAEXITP ,
+         DCBD  DSORG=PS,DEVD=DA
+         ZEVT  DSECT=YES,LIST=YES
+         END   ,

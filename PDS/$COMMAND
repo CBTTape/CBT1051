@@ -1,0 +1,159 @@
+*/*********************************************************************
+*/*
+*/*                          zEMF
+*/*                    SUBSYSTEM SERVER
+*/*                         COMMANDS
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/* ----------------------> HELP COMMAND <----------------------------
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZEMF HELP
+*/*
+*/* Display: Subsystem Server Display Commands
+*/*           STATUS   - display subsystem server status
+*/*           OPTIONS  - display subsystem server options
+*/*           EXITS    - display subsystem server dynamic exits
+*/*           TRACE    - display subsystem server trace data
+*/*
+*/*          Subsystem Server Action Commands
+*/*           SHUTDOWN        - shutdown subsystem server
+*/*           DBG=(ON|OFF)    - toggle subsystem server debugging
+*/*           TRC=(ON|OFF)    - toggle subsystem server tracing
+*/*           TRACE=CLEAR     - clear subsystem server trace data
+*/*           EXIT=name,STATUS=ACTIVE    - activate dynamic exit
+*/*           EXIT=name,STATUS=INACTIVE  - deactivate dynamic exit
+*/*          END
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/* --------------------> DISPLAY COMMANDS <--------------------------
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZEMF STATUS
+*/*
+*/* Display: Subsystem Server Status .......... Active
+*/*           Local Start Time ................ 08:55:37:34 12/26/2023
+*/*           Residency ....................... Dynamic-LPA
+*/*           Common services ................. EMFCSM
+*/*           Server initialization ........... EMFINI
+*/*           Initialization PARMLIB .......... BENMAR.ZEMF.PARMLIB
+*/*           Initialization member ........... ZEMFTEST
+*/*           ZEVT vector table ............... 02FAE578
+*/*           Security server class ........... NONE
+*/*           EOM listener .................... 00000037
+*/*           Command listener ................ 00000007
+*/*           Dynamic exits listener .......... 00000103
+*/*           In-flight exits ................. 00000001
+*/*           Persistent System-Level Token ... MSAS_ZEMF_V1R1M0
+*/*          END
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZEMF OPTIONS
+*/*
+*/* Display: Subsystem Server Options
+*/*           DBG  = On
+*/*           TRC  = OFF
+*/*           SAF  = YES
+*/*           LIB  = SYS1.ZEMF.V1R1M0.PARMLIB
+*/*           MEM  = ZEMFMSTR
+*/*          END
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZEMF EXITS
+*/*
+*/* Display: Subsystem Server Dynamic Exits Facility exits
+*/*           EMFXIT    EXIT             STATE    QUEUE
+*/*           ZEMFUTL   SYS.IEFUTL       INACTIVE 7F59C5C8
+*/*           ZEMFUTL1  SYSSTC.IEFUTL    INACTIVE 7F59C5C8
+*/*           ZEMFUSO1  SYSSTC.IEFUSO    INACTIVE 7F59C988
+*/*           ZEMFUJP1  SYSSTC.IEFUJP    INACTIVE 7F59CD48
+*/*           ZEMFU29   SYS.IEFU29       INACTIVE 7F59CE38
+*/*           ZEMFU291  SYSSTC.IEFU29    INACTIVE 7F59CE38
+*/*           ZEMF29L   SYS.IEFU29L      INACTIVE 7F541118
+*/*           ZEMF29L1  SYSSTC.IEFU29L   INACTIVE 7F541118
+*/*           ZEMFU83   SYS.IEFU83       INACTIVE 7F541208
+*/*           ZEMFU831  SYSSTC.IEFU83    INACTIVE 7F541208
+*/*           ZEMFU84   SYS.IEFU84       INACTIVE 7F5412F8
+*/*           ZEMFU841  SYSSTC.IEFU84    INACTIVE 7F5412F8
+*/*           ZEMFU85   SYS.IEFU85       INACTIVE 7F5413E8
+*/*           ZEMFU851  SYSSTC.IEFU85    INACTIVE 7F5413E8
+*/*           ZEMFU86   SYS.IEFU86       INACTIVE 7F5414D8
+*/*           ZEMFU861  SYSSTC.IEFU86    INACTIVE 7F5414D8
+*/*          END
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/* --------------------> ACTION COMMANDS <---------------------------
+*/* ------------------------------------------------------------------
+*/*
+*/* Command:  ZEMF SHUTDOWN
+*/*
+*/* Display:  ZEMF97I  ZEMF Subsystem server termination in progress
+*/*           IEFJ022I SETSSI DELETE COMMAND FOR SUBSYSTEM ZEMF
+*/*                    COMPLETED SUCCESSFULLY
+*/*           ZEMF98I  ZEMF Subsystem server termination complete
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command:  ZEMF EXIT=exitname,STATE={ACTIVE|INACTIVE}
+*/*
+*/* Examples: ZEMF EXIT=*,STATE=ACTIVE
+*/*           ZEMF EXIT=ALL,STATE=ACTIVE
+*/*           ZEMF EXIT=ALL,STATE=INACTIVE
+*/*
+*/*           ZEMF EXIT=IEFUTL,STATE=ACTIVE
+*/*           ZEMF EXIT=IEFUTL,STATE=INACTIVE
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZEMF DBG=ON
+*/*
+*/* Display: ZEMF12I Subsysytem DBG option set to ON
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZEMF DBG=OFF
+*/*
+*/* Display: ZEMF12I Subsysytem DBG option set to OFF
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZEMF TRC=ON
+*/*
+*/* Display: ZEMF12I Subsysytem TRC option set to ON
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZEMF TRC=OFF
+*/*
+*/* Display: ZEMF12I Subsysytem TRC option set to OFF
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Command: ZEMF TRACE=CLEAR
+*/*
+*/* Display: ZEMF16I Subsystem Server trace data cleared
+*/*
+*/*
+*/* ------------------------------------------------------------------
+*/*
+*/* Contact me:
+*/*  Feel free to contact me if you have questions.
+*/*
+*/*  Ben Marino
+*/*  b2marino@outlook.com
+*/*
+*/*
+*/*********************************************************************

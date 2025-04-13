@@ -1,0 +1,56 @@
+*/*********************************************************************
+*/*
+*/*                         zEMF
+*/*                  SUBSYSTEM SERVER
+*/*                INTALLATION PROCEDURE
+*/*
+*/*
+*/*  THE FOLLOWING STEPS INSTALL THE zEMF SUBSYSTEM SERVER:
+*/*
+*/*  1. MODIFY AND SUBMIT JOB: $ALLOC
+*/*      Allocates all required zEMF subsystem server datasets
+*/*
+*/*
+*/*  2. MODIFY AND SUBMIT JOB: $LINK
+*/*      Assembles and links load modules ZEMFINI and zEMFSRV.
+*/*
+*/*
+*/*  3. MODIFY AND SUBMIT JOB: $RACF (optional)
+*/*      Defines the $ZEMFCLS class and resource profiles
+*/*      to your security server.
+*/*
+*/*
+*/*  4. Add the zEMF subsystem to PARMLIB member: IEFSSNxx.
+*/*
+*/*      SUBSYS SUBNAME(ZEMF)
+*/*             INITRTN(ZEMFINI)
+*/*             INITPARM('LIB=SYS1.ZEMF.PARMLIB,MEM=ZEMFMSTR,TRC=ON')
+*/*
+*/*
+*/*  5. Issue the following MVS command to refresh the LLA:
+*/*
+*/*      MODIFY LLA,REFRESH
+*/*
+*/*
+*/*  6. Issue the SETSSI ADD command to dynamically define the
+*/*     zEMF subsystem server to MVS:
+*/*
+*/*      SETSSI ADD,SUB=ZEMF,I=ZEMFINI,
+*/*             P='LIB=SYS1.ZEMF.PARMLIB,MEM=ZEMFMSTR,TRC=ON'
+*/*
+*/*
+*/*  7. Successful zEMF subsystem server initialization issues
+*/*     the following WTO messages:
+*/*
+*/*      ZEMF00I ZEMF Subsystem server initialization in progress
+*/*      ZEMF01I ZEMF Subsystem server initialization complete
+*/*
+*/*
+*/*  CONTACT ME:
+*/*  Feel free to contact me if you have questions.
+*/*
+*/*  Ben Marino
+*/*  b2marino@outlook.com
+*/*
+*/*
+*/*********************************************************************

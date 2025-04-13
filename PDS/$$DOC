@@ -1,0 +1,302 @@
+*/*********************************************************************
+*/*
+*/*                         zEMF
+*/*                 SMF EXITS MANAGEMENT
+*/*                       FACILITY
+*/*
+*/* OVERVIEW:
+*/*  The reason for zEMF is to allow you to dynamically modify SMF
+*/*  exits behavior without requiring you to change the distributed
+*/*  SMF exits. zEMF allows you to make these chages dynamically
+*/*  thru sets of parameters specifically designed for each SMF exit.
+*/*
+*/*  By using these zEMF parameters, you can influence SMF exits to
+*/*  take different actions based on batch jobs, started tasks and
+*/*  TSO sessions.
+*/*
+*/*
+*/* INTRODUCTION:
+*/*  The MVS operating system's SMF component is equipped with
+*/*  various default SMF exits that activate when resource limits
+*/*  are exceeded, necessitating intervention. These exits oversee
+*/*  maximum CPU and SYSOUT limits, determine which SMF records
+*/*  are to be written or omitted from the active SMF dataset,
+*/*  manage dumping when the dataset reaches capacity, and handle
+*/*  the switch between SMF recording datasets.
+*/*
+*/*  One such default exit, the IEFUTL SMF exit, functions as
+*/*  follows: it is triggered when the JOB, STEP, or JOB WAIT time
+*/*  limit expires. If the JOB's CPU time limit expires, the exit
+*/*  terminates the JOB. If the STEP's CPU time limit expires, it
+*/*  extends the limit by a fixed amount. Similarly, if the continuous
+*/*  WAIT time limit expires, it extends the wait time. However, if
+*/*  more than three extensions are needed, the JOB is terminated.
+*/*  This default exit applies uniformly to all workloads running on
+*/*  the system, regardless of whether they are JOBs, Started
+*/*  Tasks, or TSO sessions.
+*/*
+*/*  Customizing the behavior of a SMF exit requires Systems
+*/*  Programmers to code the necessary changes, conduct thorough
+*/*  testing, and implement the modified exits into the MVS operating
+*/*  system, necessitating an IPL to take effect. Any bugs during SMF
+*/*  exit execution can jeopardize the workload's integrity and even
+*/*  lead to system crashes.
+*/*
+*/*  The zEMF Exits Management Subsystem Server, addresses these
+*/*  challenges by allowing System Programmers to implement changes
+*/*  to SMF exits without altering the code. zEMF enables quick
+*/*  modification and dynamic implementation of rules into the MVS
+*/*  operating system simply by defining external SMF exit rules.
+*/*  This eliminates potential risks to production workload activity
+*/*  and eliminates the need for MVS operating system IPLs when
+*/*  implementing SMF exit changes.
+*/*
+*/*  Moreover, zEMF provides the capability for System Programmers
+*/*  to classify resource usage by JOBs, Started Tasks, and TSO
+*/*  sessions, supporting the usage of generic jobnames for each.
+*/*  For instance, they can designate JOB A to utilize unlimited CPU
+*/*  resources while restricting JOB B to limited CPU resources.
+*/*  Similarly, they can allocate limited CPU resources to a specific
+*/*  category of TSO users while granting unlimited CPU resources
+*/*  to another category. This granular control over resource
+*/*  allocation facilitates efficient management of system resources
+*/*  based on specific workload requirements.
+*/*
+*/*
+*/* MVS DYNAMIC EXITS FACILITY:
+*/*  The MVS Dynamic Exits Facility is a set of services implemented
+*/*  by The EXIT statement of the MVS PROGxx PARMLIB member.
+*/*  It allows an installation to add exit routines to an exit, delete
+*/*  an exit routine for an exit, change the state of an exit routine,
+*/*  change the attributes of an exit, and undefine an implicitly
+*/*  defined exit. Refer to z/OS MVS Installation Exits for additional
+*/*  information.
+*/*
+*/*
+*/* zEMF DYNAMIC EXITS FACILITY EXPLOITATION:
+*/*  The zEMF subsystem server takes advantage of the MVS Dynamic
+*/*  Exits Facility to associate its exits with SMF exits that have
+*/*  been defined to the Dynamic Exits Facility by the SMF component
+*/*  of MVS.
+*/*
+*/*
+*/* zEMF PARMLIB DATASET:
+*/*  ZEMF.PARMLIB is an essential PDS for the zEMF subsystem server,
+*/*  housing the initialization member ZEMFMSTR. Within this member,
+*/*  specific parameters dictate the inclusion of SMF exits into the
+*/*  MVS Dynamic Exits Facility. This PDS is allocated during the
+*/*  execution of the INSTLIB($ALLOC) job, a step integral to the
+*/*  installation process detailed in the INSTLIB($INSTALL)
+*/*  documentation member.
+*/*
+*/*  ZEMF.PARMLIB serves as the location where you define the SMF
+*/*  exits that you want the zEMF subsystem server to implement
+*/*  within your setup. To illustrate, if you aim for the zEMF
+*/*  subsystem server to manage the IEFUTL Time Limit exit, you
+*/*  include a PDS member named IEFUTL, in the ZEMFMSTR member.
+*/*
+*/*  In the zEMF ADDEXIT parameter, you outline the specifications
+*/*  for the particular workload. For instance, through the zEMF
+*/*  ADDEXIT parameter, you can delineate the workload type JOB,
+*/*  STC, or TSO. Additionally, you can specify whether the zEMF
+*/*  exit associated with IEFUTL is invoked for all work (JOB, STC,
+*/*  TSO, ASCH, OMVS) across the system or invoked exclusively for
+*/*  specific subsystems (JOB, STC, TSO).
+*/*
+*/*  Examples:
+*/*
+*/*  ADDEXIT(IEFUTL,
+*/*          STATE=ACTIVE,       add it as active
+*/*          SYS=YES')           call it for all jobs (JOB, STC, TSO,
+*/*                              ASCH, and OMVS) workloads.
+*/*  ADDEXIT(IEFUTL,
+*/*          STATE=ACTIVE,       add it as active
+*/*          SYS=NO,             donot call it system-wide
+*/*          SUBSYS='STC,TSO')   just call it for STC & TSO workloads.
+*/*
+*/*  ADDEXIT(IEFUTL,
+*/*          STATE=INACTIVE,     add it as inactive
+*/*          SYS=NO,             donot call it system-wide
+*/*          SUBSYS='STC')       just call it for STC workload.
+*/*
+*/*
+*/*  When STATE=INACTIVE is specified, zEMF refrains from invoking the
+*/*  exit. Whenever you're ready, you can alter the exit state by
+*/*  issuing the following zEMF subsystem server command:
+*/*
+*/*  ZEMF EXIT=IEFUTL,STATE=ACTIVE
+*/*
+*/*  Similarly, you can transition the state of an exit from active to
+*/*  inactive by issuing the following zEMF subsystem server command:
+*/*
+*/*  ZEMF EXIT=IEFUTL,STATE=INACTIVE
+*/*
+*/*  Refer to PARMLIB(ZEMFMSTR) initialization member for additional
+*/*  ADDEXIT definitions.
+*/*
+*/*  Refer to INSTLIB($COMMAND) documentation member for a description
+*/*  of all zEMF subsystem server commands.
+*/*
+*/*
+*/* DEFINING SMF EXITS:
+*/*  The initialization PDS, ZEMF.PARMLIB serves to specify which
+*/*  SMF exits the zEMF subsystem server should manage. It's crucial
+*/*  to ensure that the names of the SMF exit members defined here
+*/*  correspond to supported MVS SMF component exit names. This
+*/*  alignment enables seamless association between the zEMF subsystem
+*/*  server's exits and the SMF exit designated by SMF to the MVS
+*/*  Dynamic Exits Facility.
+*/*
+*/*  The MVS SMF component defines and adds all its supported SMF exits
+*/*  to the Dynamic Exits Facility. As an illustration, it defines and
+*/*  integrates the IEFUTL Time Limit exit with a name of SYS.IEFUTL,
+*/*  SYSSTC.IEFUTL, SYSTSO.IEFUTL, SYSJES2.IEFUTL, SYSJES3.IEFUTL,
+*/*  SYSASCH.IEFUTL, and SYSOMVS.IEFUTL. This configuration ensures
+*/*  effective management of SMF exits within the zEMF subsystem server.
+*/*
+*/*  Examples:
+*/*
+*/*  JOB(PROD*,            manage jobs with generic jobname of "PROD*"
+*/*      JOBCPU=10,5,       allow 10 additional seconds; 5 extensions
+*/*      STEPCPU=5,3,       allow 5 additional seconds; 3 extensions
+*/*      WAITTIME=JWT,3,    allow SMFPRMxx JWT wait time; 3 extensions
+*/*      WARNWTO=YES)       issue warning WTO for each granted extensio
+*/*
+*/*  JOB(TST*X*,           manage jobs with generic jobnames of "TST*X*"
+*/*      JOBCPU=0,          donot allow additional CPU
+*/*      STEPCPU=0,         donot allow additional CPU
+*/*      WAITTIME=0,        donot allow additional WAIT time
+*/*      WARNWTO=NO)        donot issue warning WTO message
+*/*
+*/*  JOB(GLDAILY,          manage jobs GLDAILY
+*/*      JOBCPU=0,          donot allow additional CPU
+*/*      STEPCPU=0,         donot allow additional CPU
+*/*      WAITTIME=0,        donot allow additional WAIT time
+*/*      WARNWTO=NO)        donot issue warning WTO message
+*/*
+*/*  TSO(TS*,              manage TSO userIDs with generic name of "TS*"
+*/*      WAITTIME=NOLIMIT,  unlimited WAIT time extensions
+*/*      WARNWTO=NO)        donot issue warning message
+*/*
+*/*  TSO(OPER*             manage userIDs with generic name of "OPER*"
+*/*      WAITTIME=NOLIMIT,  unlimited WAIT time extensions
+*/*      WARNWTO=NO)        donot issue warning message
+*/*
+*/*  STC(*,                manage all STCs regardless of STC name
+*/*      JOBCPU=NOLIMIT,    unlimited job CPU extensions
+*/*      STEPCPU=NOLIMIT,   unlimited step CPU extensions
+*/*      WAITTIME=NOLIMIT,  unlimited WAIT time extensions
+*/*      WARNWTO=NO)        donot issue warning WTO message
+*/*
+*/*  Note: Coding conventions for each exit are documented at the
+*/*        bottom of each ZEMF.PARMLIB PDS member.
+*/*
+*/*
+*/* zEMF SERVER INITIALIZATION:
+*/*  The zEMF subsystem server is installed in write-protected Dynamic-
+*/*  LPA, eliminating the need for its own dedicated address space.
+*/*  Activation of the zEMF subsystem server is initiated issuing the
+*/*  MVS SETSSI ADD system command.
+*/*
+*/*  Upon issuing the MVS SETSSI ADD system command, you designate the
+*/*  initialization routine that creates the subsystem environment.
+*/*  Initialization is carried out via the ZEMFINI routine.
+*/*
+*/*  Issuing the SETSSI ADD system command triggers the ZEMFINI exit
+*/*  routine to run in the MVS Master Scheduler Address space, in an
+*/*  attached task.
+*/*
+*/*  ZEMFINI loads the zEMF common services load module, ZEMFSRV,
+*/*  into the write-protected Dynamic-LPA, and establishes the zEMF
+*/*  subsystem server environment. Following the completion of ZEMFINI
+*/*  initialization, MVS detaches the ZEMFINI task.
+*/*
+*/*  Successful zEMF subsystem server initialization issues the
+*/*  following WTO messages:
+*/*
+*/*  ZEMF00I ZEMF Subsystem server initialization in progress
+*/*  ZEMF01I ZEMF Subsystem server initialization complete
+*/*
+*/*  Examples:
+*/*  Issue the MVS SETSSI system command to initialize the zEMF
+*/*  subsystem server. SUBNAME specifies the subsystem name, INITRTN
+*/*  specifies the name of the initialization routine, and INITPARM
+*/*  specifes the name of the ZEMF.PARMLIB dataset, as well as the PDS
+*/*  member name that contains the ADDEXIT initialization parameters.
+*/*
+*/*  SUBSYS SUBNAME(ZEMF)
+*/*         INITRTN(ZEMFINI)
+*/*         INITPARM('LIB=SYS1.ZEMF.PARMLIB,MEM=ZEMFMSTR')
+*/*
+*/*  SUBSYS SUBNAME(ZEMF)
+*/*         INITRTN(ZEMFINI)
+*/*         INITPARM('LIB=SYS1.ZEMF.PARMLIB,MEM=ZEMFMS99,TRC=ON')
+*/*
+*/*  SUBSYS SUBNAME(ZEMF)
+*/*         INITRTN(ZEMFINI)
+*/*         INITPARM('LIB=SYS1.ZEMF.PARMLIB,MEM=MESTING,SAF=YES')
+*/*
+*/*
+*/* zEMF INITPARM PARAMETERS:
+*/*  You can specify any of the following zEMF subsystem server
+*/*  parameters on the MVS SETSSI ADD system command:
+*/*
+*/*   LIB={DSname} Specifies the name of the zEMF initialization
+*/*                parameters PARMLIB dataset.
+*/*
+*/*   MEM={member} Specifies the zEMF initialization ZEMF.PARMLIB
+*/*                member name. If not specified, the default member
+*/*                name is zEMFMSTR.
+*/*
+*/*   SAF={YES|NO} Specifies if external security is required to
+*/*                issue zEMF subsystem commands. If not specified
+*/*                extermal security is not invoked.
+*/*
+*/*                When external security is enabled by setting
+*/*                the initialization parameter SAF=YES, users are
+*/*                required to possess READ authority to the
+*/*                following profile within RACF server server class
+*/*                $ZEMFCLS: EMF.SERVER.CMD
+*/*
+*/*                Refer to INSTLIB($RACF) for security server
+*/*                implementation details.
+*/*
+*/*   DBG={ON|OFF} Specifies if debugging is ON or OFF.
+*/*                DBG=ON causes processing routines to issue code
+*/*                path informational WTO messages. If not specified,
+*/*                the default is DBG=OFF.
+*/*
+*/*   TRC={ON|OFF} Specifies if internal code tracing is ON or OFF.
+*/*                If not specified, the default is TRC=OFF.
+*/*
+*/*
+*/* zEMF SERVER TERMINATION:
+*/*  You can shutdown the zEMF subsystem server by issuing the
+*/*  following SHUTDOWN command:
+*/*
+*/*  ZEMF SHUTDOWN
+*/*
+*/*  zEMF internally issues the following SSI DELETE MVS system
+*/*  command to deactivate the zEMF subsystem server from the
+*/*  MVS subsystem interface, SSI component.
+*/*
+*/*  SETSSI DELETE,SUB=ZEMF,FORCE
+*/*
+*/*  Successful subsystem server shutdown issues the the following
+*/*  WTO messages:
+*/*
+*/*    ZEMF97I  ZEMF Subsystem server termination in progress
+*/*    IEFJ022I SETSSI DELETE COMMAND FOR SUBSYSTEM ZEMF COMPLETED
+*/*             SUCCESSFULLY
+*/*    ZEMF98I  ZEMF Subsystem server termination complete
+*/*
+*/*  Note: The zEMF subsystem server can be restarted by issuing the
+*/*        SETSSI ADD system command.
+*/*
+*/*
+*/* CONTACT ME:
+*/*  Feel free to contact me if you have questions.
+*/*  Ben Marino
+*/*  b2marino@outlook.com
+*/*
+*/*********************************************************************

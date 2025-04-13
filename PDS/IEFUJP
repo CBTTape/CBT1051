@@ -1,0 +1,83 @@
+***********************************************************************
+*                                                                     *
+* IEFUJP - Job Purge Exit                                             *
+*  Receives control from the job entry subsystem (JES2/3) when        *
+*  a job is ready to be purged from the system.                       *
+*                                                                     *
+* You can use IEFUJP to:                                              *
+*  - Write job purge record (type 26) to SMF                          *
+*  - Do not write job purge record (type 26) to SMF                   *
+*  - Issue commands                                                   *
+*  - Issue warning WTO messages                                       *
+*                                                                     *
+* Supported subsystems:                                               *
+*  - STC                                                              *
+*  - JOB (JES2, JES3)                                                 *
+*                                                                     *
+***********************************************************************
+JOB(BENTST*,              TESTING EXIT
+    PURGE=NO,              ****testing................
+    WARNWTO=YES)           ****testing................
+*
+*
+*
+*
+JOB(PROD*,                PRODUCTION JOBS
+    PURGE=NO,              write type 26 record to SMF
+    WARNWTO=NO)            do not issue warning WTO message
+*
+JOB(TEST*,                TEST JOBS
+    PURGE=NO,              write type 26 record to SMF
+    WARNWTO=YES)           issue warning WTO message
+*
+STC(*,                    ALL STARTED TASKS
+    PURGE=YES,             do not write type 26 record to SMF
+    WARNWTO=NO)            do not issue warning WTO message
+*
+*
+***********************************************************************
+*                                                                     *
+* CODING CONVENTIONS:                                                 *
+*                                                                     *
+*  Syntax:                                                            *
+*   Separate parameters with commas.                                  *
+*   Enclose list of parameters within parenthesis.                    *
+*                                                                     *
+*  Parameters:                                                        *
+*   ({JOB|STC},                                                       *
+*    PURGE={NO|YES},                                                  *
+*    WARNWTO={NO|YES},                                                *
+*    COMMAND={'command-text'})                                        *
+*                                                                     *
+*  Description:                                                       *
+*   PURGE={NO|YES}                                                    *
+*    Specifies if SMF (type 26) job purge record is to be written     *
+*    to SMF. There is no defult. You must specify YES or NO.          *
+*                                                                     *
+*   Examples:                                                         *
+*    PURGE=NO       - write job purge record to SMF                   *
+*    PURGE=YES      - do not write job purge record to SMF            *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+*   WARNWTO={NO|YES}                                                  *
+*    Specifies the WTO message option. If not specified the default   *
+*    is WARNWTO=NO. WARNWTO=YES allows the subsystem server to issue  *
+*    a warning WTO message.                                           *
+*                                                                     *
+*    Examples:                                                        *
+*     WARNWTO=NO  - subsystem server does not issue warning message   *
+*     WARNWTO=YES - subsystem server issues warning WTO message       *
+*                                                                     *
+*    Message Examples:                                                *
+*     ZEMF84W JOB jobname - SMF Type 26 purge record archived         *
+*     ZEMF84W JOB jobname - SMF Type 26 purge record purged           *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* COMMAND='command-text'                                              *
+*  Specifies a system or subsystem command to be issued.              *
+*  The length of the command can not exceed 60 characters.            *
+*                                                                     *
+***********************************************************************
+*

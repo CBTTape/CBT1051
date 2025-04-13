@@ -1,0 +1,676 @@
+EMFMSG   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        EMFMSG                                              */
+*/*                                                                  */
+*/* Function:    ZEMF subsystem server message manager               */
+*/*                                                                  */
+*/* Input Regs:  R1  Parmlist                                        */
+*/*              R11 ZEVT address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R1  Output parameter                                */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/* Attributes:  TCB-mode                                            */
+*/*              SRB-mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+EMFMSG   AMODE 31
+EMFMSG   RMODE ANY
+         COPY  ZGBLS
+         USING EMFMSG,R15              Entry
+         STM   R14,R12,GPR@R14(R13)    save caller's regs
+         B     WTOINIT                 branch
+         ZMACS GEN=MID,DSECT=NO        module ID
+*
+WTOINIT  DS    0H
+         DROP  R15
+         LR    R10,R15                 base
+         USING EMFMSG,R10
+         LR    R4,R1                   protect parm reg
+         L     R2,=AL4(RSN36)          RSN
+         USING ZEVT,R11
+         CLC   ZEVTID,=CL4'ZEVT'       ID?
+         BNE   WTOABEND                no, ABEND
+*
+**       Identify message caller
+*
+         XR    R2,R2
+         IPK   ,                       entry protect key
+         LR    R5,R2                   protect it
+         LA    R6,&SP255               LSQA subpool
+         SRL   R2,4                    shift out 4-bits
+         LTR   R2,R2                   key zero caller?
+         BZ    WTO0000                 yes
+         LA    R6,&SP230               private subpool
+*
+**       Obtain dynamic storage area
+*
+WTO0000  DS    0H
+         STORAGE OBTAIN,LOC=ANY,                                       +
+               LENGTH=DSA@SIZE,SP=(6),KEY=(5),LINKAGE=SYSTEM
+         LR    R12,R1
+         USING DSA,R12
+         LA    R3,DSA@SIZE             DSA size
+         LR    R2,R1                   copy address
+         XR    R15,R15                 zero
+         MVCL  R2,R14                  scrub DSA
+         ST    R13,GPR@BWD(,R1)        chain,
+         ST    R1,GPR@FWD(,R13)        saveareas.
+         LR    R13,R1                  set my savearea
+         ST    R4,DSAIPAR              save input parm
+         ST    R5,DSAEKEY              save caller key
+         ST    R6,DSAESPN              save storage subpool
+*
+**       Locate requested message
+*
+         L     R2,WTOTEND              table end-address
+         L     R3,WTOTBLE              table start-address
+         L     R1,0(,R4)               WTOID address
+         MVC   DSAMID,0(R1)            copy WTO msgID
+*
+WTO0010  DS    0H
+         CR    R3,R2                   last entry?
+         BL    WTO0020                 no, test further
+         MVC   DSARC,=AL4(RC8)         set error RC
+         LH    R1,ZEMF11E              get text length
+         LA    R1,4(,R1)               add ROUT/DESC codes
+         BCTR  R1,0
+         EX    R1,COPYMSG              copy message
+         MVC   DSAWTXT+1(7),DSAMID     show error msg-ID
+         B     WTO0800                 issue error msg
+*
+WTO0020  DS    0H
+         CLC   DSAMID,4(R3)            MID match?
+         BE    WTO0030                 yes, carry on
+         LH    R1,0(,R3)               get text length
+         LA    R1,3(,R1)               round up to next,
+         N     R1,=XL4'FFFFFFFC'       fullword boundary
+         LA    R3,4(R1,R3)             add DESC+ROUT codes
+         B     WTO0010                 loop
+*
+WTO0030  DS    0H
+         MVI   DSAWTO,BLANK
+         MVC   DSAWTO+1(DSAWTOL-1),DSAWTO
+         LH    R1,0(,R3)               get text length
+         ST    R1,DSATXLN              save text length
+         LA    R1,4(,R1)               add DESC+ROUT size
+         BCTR  R1,0                    decrement for EXecute
+         EX    R1,COPYWTO              copy WTO message
+*
+**       Resolve message variables
+*
+         LA    R6,DSAWTXT              msg text address
+         LH    R5,DSAWLEN              get text length
+         SH    R5,=H'4'                subtract MCS flags
+*
+WTO0040  DS    0H
+         TM    0(R4),ENDVL             end of parmlist?
+         BNZ   WTO0700                 yes, issue target WTO
+         LA    R4,4(,R4)               next var ptr
+         L     R3,0(,R4)               var data address
+*
+WTO0050  DS    0H
+         CLI   0(R6),C'%'              var ID found?
+         BE    WTO0060                 yest test further
+         CLI   0(R6),C'!'              var ID found?
+         BE    WTO0060                 yest test further
+         CLI   0(R6),C'@'              var ID found?
+         BE    WTO0060                 yest test further
+         LA    R6,1(,R6)               walk thru text
+         BCT   R5,WTO0050              loop
+         B     WTO0700                 issue WTO message
+*
+WTO0060  DS    0H
+         LR    R1,R6                   copy var ID address
+         MVC   DSAVARID,0(R6)          save var ID found
+*
+WTO0070  DS    0H
+         CLC   DSAVARID,0(R6)          end of var ID found?
+         BNE   WTO0080                 yes, compute var ID length
+         LA    R6,1(,R6)               walk thru text
+         BCT   R5,WTO0070              loop
+*
+WTO0080  DS    0H
+         LR    R2,R6                   copy msg text address
+         SLR   R2,R1                   compute var length
+         CLI   DSAVARID,C'%'           text var ID?
+         BNE   WTO0090                 no, test further
+         BCTR  R2,0                    decrement for EXecute
+         EX    R2,MOVEVAR              move var data to msg
+         B     WTO0600                 loop
+*
+WTO0090  DS    0H
+         CLI   DSAVARID,C'!'           hexadecimal var ID?
+         BNE   WTO0300                 no, test further
+         MVC   DSASRC,0(R3)            get var value
+         ZMACS GEN=CNVX,DSAVAR,DSASRC,TR=TRANTAB
+         LA    R15,2                   compare length
+         CLR   R2,R15                  display 6-hex digits?
+         BH    WTO0100                 no, test further
+         MVC   0(2,R1),DSAVAR+6        move var data to msg
+         B     WTO0600                 loop
+*
+WTO0100  DS    0H
+         LA    R15,4                   compare length
+         CLR   R2,R15                  display 4-hex digits,
+         BH    WTO0200                 no, test further
+         MVC   0(4,R1),DSAVAR+4        move var data to msg
+         B     WTO0600                 loop
+*
+WTO0200  DS    0H
+         MVC   0(8,R1),DSAVAR          move var data to msg
+         B     WTO0600                 loop
+*
+WTO0300  DS    0H
+         CLI   DSAVARID,C'@'           decimal var ID?
+         BNE   WTO0600                 no, carry on
+         L     R15,0(,R3)              get var value
+         CVD   R15,DSADWRD             make decimal
+         OI    DSADWRD+7,X'0F'         fix sign
+         UNPK  DSAVAR,DSADWRD          unpack it
+*
+         LA    R15,2                   compare length
+         CLR   R2,R15                  display 6-hex digits?
+         BH    WTO0400                 no, test further
+         MVC   0(2,R1),DSAVAR+6        move var data to msg
+         B     WTO0600                 loop
+*
+WTO0400  DS    0H
+         LA    R15,4                   compare length
+         CLR   R2,R15                  display 4-hex digits,
+         BH    WTO0500                 no, test further
+         MVC   0(4,R1),DSAVAR+4        move var data to msg
+         B     WTO0600                 loop
+*
+WTO0500  DS    0H
+         MVC   0(8,R1),DSAVAR          move var data to msg
+*
+WTO0600  DS    0H
+         LA    R6,1(,R6)               walk thru text
+         BCT   R5,WTO0040              loop
+*
+**       Compress message text
+*
+WTO0700  DS    0H
+         ZCALL SR=COMPWTO              yes
+*
+**       Issue requested message
+*
+WTO0800  DS    0H
+         USING PSA,0
+         ICM   R1,15,PSATOLD           SRB-mode caller?
+         BZ    WTO0900                 yes
+*
+         SETLOCK TEST,TYPE=LOCAL,                                      +
+               BRANCH=(HELD,WTO0900),                                  +
+               RELATED=('Use branch linkage if lock is held')
+*
+**       Avoid S0F8-10 ABENDs
+*
+         XR    R2,R2                   mi piace pulito
+         XR    R3,R3                   mi piace pulito
+         EPAR  R2                      primary ASID
+         ESAR  R3                      secondary ASID
+         CLR   R2,R3                   PASN=SASN?
+         BE    WTO0900                 yes, branch enter WTO
+*
+**       Issue message via SVC
+*
+         MVC   DSAWSUB,ZEVTSUBN        insert server name
+         WTO   MF=(E,DSAWTO)           issue message
+         B     WTO0999                 exit
+*
+**       Issue message via branch entry
+*
+WTO0900  DS    0H
+         MVC   DSAWSUB,ZEVTSUBN        insert server name
+         WTO   MF=(E,DSAWTO),          issue message                   +
+               LINKAGE=BRANCH          branch entry
+*
+WTO0999  DS    0H
+         ST    R15,DSARC               save RC
+         ST    R0,DSARSN               save RSN
+         ST    R1,DSAGR1               save EOM ID
+*---------------------------------------------------------------------*
+*        Exit Routine                                                 *
+*--------+---------+---------+---------+---------+---------+---------+*
+WTOEXIT  DS    0H
+         L     R13,GPR@BWD(,R13)       caller savearea
+         LA    R3,GPR@R15(,R13)        R15 slot address
+         MVC   0(DSA@OPZL,R3),DSAOPAR  return output parms
+         L     R2,DSAEKEY              caller key
+         L     R3,DSAESPN              storage subpool
+         STORAGE RELEASE,COND=NO,ADDR=(12),                            +
+               LENGTH=DSA@SIZE,SP=(3),KEY=(2),LINKAGE=SYSTEM
+         LM    R14,R12,GPR@R14(R13)    restore caller's regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        ABEND Exit                                                   *
+*--------+---------+---------+---------+---------+---------+---------+*
+WTOABEND DS    0H
+         ABEND &UCODE,DUMP,REASON=(R2)
+*---------------------------------------------------------------------*
+*        EXecuted Instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+MOVEVAR  MVC   0(*-*,R1),0(R3)
+COPYWTO  MVC   DSAWTO(*-*),0(R3)
+COPYMSG  MVC   DSAWTO(*-*),ZEMF11E
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+WTOTEND  DC    A(WTOTBEND)             WTO table end-address
+WTOTBLE  DC    A(WTOTABLE)             WTO table start-address
+TRANTAB  DC    CL16'0123456789ABCDEF'  translate table
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:         COMPWTO                                            */
+*/*                                                                  */
+*/* Function:     Compress WTO message subroutine                    */
+*/*                                                                  */
+*/* Input Regs:   R11 ZEVT address                                   */
+*/* Input Regs:   R13 savearea address                               */
+*/*               R14 return address                                 */
+*/*               R15 entry point address                            */
+*/*                                                                  */
+*/* Regs Usage:   R11 ZEVT address                                   */
+*/*               R10 Base address                                   */
+*/*               R12 DSA address                                    */
+*/*               R13 Savearea address                               */
+*/*                                                                  */
+*/* Output Regs:  R0  Reason code                                    */
+*/*               R1  Output parameter                               */
+*/*               R15 Return code                                    */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+COMPWTO  DS    0H
+         USING DSA,R12
+         B     12(,R15)
+         DC    CL8'COMPWTO'            PC routine
+         STM   R14,R12,GPR@R14(R13)    save caller's regs
+         LR    R10,R15                 set base address
+         USING COMPWTO,R10
+         LA    R1,DSASBSA              subroutine save area
+         ST    R13,GPR@BWD(,R1)        chain,
+         ST    R1,GPR@FWD(,R13)        save,
+         LR    R13,R1                  areas.
+*
+         LA    R4,DSAXTXT              compress msg address
+         LA    R3,DSAWTXT              WTO msg text address
+         LH    R2,DSAWLEN              WTO text length
+         SH    R2,=H'12'               minus MCS flags & msg prefix
+         LA    R2,0(R2,R3)             WTO msg end-address
+         MVC   DSAROUT,0(R2)           save ROUTCDE & DESC codes
+         MVI   DSAXTXT,BLANK           clear WTO workarea
+         MVC   DSAXTXT+1(DSAXTXTL-1),DSAXTXT
+         B     COMP020                 carry on
+*
+COMP010  DS    0H
+         CLI   0(R3),XZERO             end of text?
+         BE    COMP035                 yes, test further
+         CLI   0(R3),BLANK             blank?
+         BNE   COMP020
+         LR    R1,R3                   msg text address
+         BCTR  R1,0                    subtract one
+         CLI   0(R1),BLANK             previous char blank?
+         BNE   COMP020                 no, copy char
+         LA    R3,1(,R3)               next msg text address
+         B     COMP030                 loop
+*
+COMP020  DS    0H
+         MVC   0(1,R4),0(R3)           copy char
+         LA    R3,1(,R3)               next msg text char
+         LA    R4,1(,R4)               next msg text char
+*
+COMP030  DS    0H
+         CLR   R3,R2                   all done?
+         BL    COMP010                 no, loop
+*
+COMP035  DS    0H
+         MVI   DSAWTXT,BLANK           clear WTO workarea
+         MVC   DSAWTXT+1(DSAWTXTL-1),DSAWTXT
+         LA    R2,DSAXTXT              msg text address
+         SLR   R4,R2                   get compresed msg length
+         BCTR  R4,0
+         EX    R4,COMPCOPY             copy compressed msg text
+*
+         LH    R2,DSAWLEN              MCS flags & msg length
+         LA    R3,DSAWTO               WTO msg address
+         LA    R3,0(R2,R3)             end-of-text address
+         MVC   0(4,R3),DSAROUT         insert ROUTCDE & DESC code
+*
+COMPEXIT DS    0H
+         L     R13,GPR@BWD(,R13)       mainline savearea
+         LM    R14,R12,GPR@R14(R13)    restore mainline regs
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        EXecuted Instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COMPCOPY MVC   DSAWTXT(*-*),DSAXTXT    copy msg text
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*--------+---------+---------+---------+---------+---------+---------+*
+*                                                                     *
+*        WTO MESSAGES                                                 *
+*                                                                     *
+*         Variables: Variables V1 thru V9 are supported               *
+*         Type:      % - Display variable data ASIS                   *
+*                    ! - Display hexadecimal variable data            *
+*                    @ - Display decimal variable data                *
+*                                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+WTOTABLE DS    0F
+*
+**       Subsystem Server initialization messages
+*
+ZEMF00I  WTO   'ZEMF00I %%%% Subsystem server initialization in progres+
+               s',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF01I  WTO   'ZEMF01I %%%% Subsystem server initialization complete',+
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF02I  WTO   'ZEMF02I SAF Security Server class name: %%%%%%%%',     +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF03E  WTO   'ZEMF03E CSVDYLPA %%% failed; SRV=%%%%%%%% RC=!!!! RSN=!+
+               !!!!!!! FL=!!!!',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF04E  WTO   'ZEMF04E 4-character subsystem name required',          +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF05E  WTO   'ZEMF05E %%%% Subsystem server initialization failed; RC+
+               =!!!! RSN=!!!!!!!!',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF06E  WTO   'ZEMF06E Invalid %%% option specified',                 +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF07E  WTO   'ZEMF07E PGSER %%%%%%%%% failed; RC=!!!!',              +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF08I  WTO   'ZEMF08I %%%% Previous instance resources released',    +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF09I  WTO   'ZEMF09I %%%% Server module %%%%%%%% added to dynamic-LP+
+               A',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF10E  WTO   'ZEMF10E CPF Command prefix define failed; RC=!!!! RSN=!+
+               !!!!!!!',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF11E  WTO   'ZEMF11E MID=%%%%%%% not found in message table',       +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF12I  WTO   'ZEMF12I Subsysytem %%% option set to %%%',             +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF13E  WTO   'ZEMF13E Subsysytem command invalid; %%%%%%%%%%%%%%%%', +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF14E  WTO   'ZEMF14E WTO Display failed; RC=!!!! ID=!!!!!!!!',      +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF15E  WTO   'ZEMF15E COMMAND AUTH ERROR; SAF=!!!! RC=!!!! RSN=!!!!!!+
+               !! CMD=%%%%%%%%%%%%%%%%',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF16I  WTO   'ZEMF16I Subsystem Server trace data cleared',          +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF17E  WTO   'ZEMF17E Invalid %%%% option specified',                +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF18E  WTO   'ZEMF18E Command invalid; %%%%%%%%%%%%%%%%%%%%%%%%',    +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF19E  WTO   'ZEMF19E Enter %%%% HELP for a list of valid commands', +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF20E  WTO   'ZEMF20E ZEVT Storage obtain failed; SP=%%% RC=!!!!',   +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF21I  WTO   'ZEMF21I %%%%%%%% %%%%%%%%%%%% Dynamic Exits Facility ex+
+               it %%%%%%%%%%%%%%%%',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF22E  WTO   'ZEMF22E Recovery environment create failed; RC=!!!! RSN+
+               !!!!!!!!',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF23I  WTO   'ZEMF23I Dynamic exit %%%%%%%%%%%%%%%% is now %%%%%%%%',+
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF24E  WTO   'ZEMF24E Dataset open failed; DD=%%%%%%%% MN=%%%%%%%% RC+
+               =!!!! RSN=!!!!!!!!',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF25E  WTO   'ZEMF25E %%%%%%%% FIND failed; RC=!!!! RSN=!!!!!!!!',   +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF26E  WTO   'ZEMF26E %%%% Failed validity check; RC=!!!! RSN=!!!!!!!+
+               !',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF27E  WTO   'ZEMF27E DYNALLOC Error; SR=%%%%%%%% DD=%%%%%%%% MN=%%%%+
+               %%%% DSN=%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%', +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF28E  WTO   'ZEMF28E DYNALLOC Error; SR=%%%%%%%% RC=!!!! I=!!!! E=!!+
+               !! DSN=%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%',   +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF29E  WTO   'ZEMF29E DYNALLOC Error; SR=%%%%%%%% RC=!!!! I=!!!! E=!!+
+               !! DDN=%%%%%%%%',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF30E  WTO   'ZEMF30E Token=%%%%%%%%%%%%%%%% %%%%%%%% failed; RC=!!!!+
+               ',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF31E  WTO   'ZEMF31E Invalid record found; DD=%%%%%%%% MN=%%%%%%%% R+
+               ID=%%%%%%%%%%%%%%%%',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF32E  WTO   'ZEMF32E %%%% Record table overflow; RC=!!!! RSN=!!!!!!!+
+               !',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF33E  WTO   'ZEMF33E %%%% Invalid record MN=%%%%%%%% RID=%%%%%%%%%%%+
+               %%%%% RSN=!!!!!!!!',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF34E  WTO   'ZEMF34E Exit name not found; XT=%%%%%%%% RSN=!!!!!!!!',+
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF35W  WTO   'ZEMF35W Unsupported exit; MN=%%%%%%%% XIT=%%%%%%%% RC=!+
+               !!! RSN=!!!!!!!!',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F                0F
+ZEMF36E  WTO   'ZEMF36E Duplicate record found; MN=%%%%%%%% RID=%%%%%%%+
+               %%%%%%%%%',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF37E  WTO   'ZEMF37E Invalid keyword parameter; MN=%%%%%%%% PARM=%%%+
+               %%%%%%%%%%%%%',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF37W  WTO   'ZEMF37W %%%%%%%% not allowed and is ignored; XT=%%%%%%%+
+               %',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF38E  WTO   'ZEMF38E Mutually exclusive keywords specified; MN=%%%%%+
+               %%% %%%%%%%%%%/%%%%%%%%%%',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF39E  WTO   'ZEMF39E Dynamic exit %%%%%%%%%%%%%%%% undefined; %%%%%%+
+               %% %%%%%% failed RC=!!!! RSN=!!!!!!!!',                 +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF39W  WTO   'ZEMF39W Dynamic exit %%%%%%%%%%%%%%%% previously added;+
+                RC=!!!! RSN=!!!!!!!!',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF40E  WTO   'ZEMF40E Dynamic exit %%%%%%%%%%%%%%%% state change fail+
+               ed; RC=!!!! RSN=!!!!!!!!',ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF41E  WTO   'ZEMF41E Specified exit %%%%%%%% not defined',          +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF42E  WTO   'ZEMF42E No dynamic exits defined',                     +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF43W  WTO   'ZEMF43W SMF recording support available with V2R1M0',  +
+               ROUTCDE=(2,11),DESC=4,MF=L
+         DS    0F
+ZEMF44I  WTO   'ZEMF44I *** available entry ***',                      +
+               ROUTCDE=(2,11),DESC=4,MF=L
+*
+**       ROUTCDE=2 DESC=4 messages (used by EMFXIT routine)
+*
+         DS    0F
+ZEMF80W  WTO   'ZEMF80W %%%% %%%%%%%% - %%%%%%%% Time limit extension g+
+               ranted',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF81W  WTO   'ZEMF81W %%%% %%%%%%%% - Granted %%%%%%%% Time limit ext+
+               ension exceeded',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF82W  WTO   'ZEMF82W %%%% %%%%%%%% - SYSOUT limit extension granted;+
+                %%%%%%%%%% lines',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF83W  WTO   'ZEMF83W %%%% %%%%%%%% - SMF type @@@@ record suppressed+
+               ',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF84W  WTO   'ZEMF84W %%%% %%%%%%%% - SMF type @@@@ record suppressed+
+               ',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF85W  WTO   'ZEMF85W %%%% %%%%%%%% - SMF type @@@@ record suppressed+
+               ',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF86W  WTO   'ZEMF86W %%%% %%%%%%%% - SMF type @@@@ record suppressed+
+               ',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF87W  WTO   'ZEMF87W %%%% %%%%%%%% - Granted SYSOUT extension exceed+
+               ed; %%%%%%%%%% lines',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF88W  WTO   'ZEMF88W %%%% %%%%%%%% - SMF type 26 purge record %%%%%%+
+               %%',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF89W  WTO   'ZEMF89W %%%% %%%%%%%% - SMF dump %%%%%%%% issued; DSN=%+
+               %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%',           +
+               ROUTCDE=2,DESC=4,MF=L
+*
+**       Server testing & termination messages
+*
+         DS    0F
+ZEMF90I  WTO   'ZEMF90I EMFTST EXIT=%%%%%%%% ZXQE=!!!!!!!!',           +
+               ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF91I  WTO   'ZEMF91I EMFTST %%%=%%%%%%%% %%%%=!!!!!!!! DATA=!!!!!!!!+
+               ',ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF92W  WTO   'ZEMF92W EMFTST EXIT=%%%%%%%% not found',               +
+               ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF93I  WTO   'ZEMF93I *** available entry ***',                      +
+               ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF94I  WTO   'ZEMF94I *** available entry ***',                      +
+               ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF97I  WTO   'ZEMF97I %%%% Subsystem server termination in progress',+
+               ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF98I  WTO   'ZEMF98I %%%% Subsystem server termination complete',   +
+               ROUTCDE=2,DESC=4,MF=L
+         DS    0F
+ZEMF99E  WTO   'ZEMF99E ZEMF SERVER ERROR; nnnnnnn/nnnnnnn ABEND=?0000 +
+               RSN=00000000',ROUTCDE=2,DESC=4,MF=L
+WTOTBEND EQU   *
+         DS    0D
+WTOTBSZE EQU   *-WTOTABLE
+*---------------------------------------------------------------------*
+*        Dynamic Storage Area                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+DSA      DSECT ,
+DSASAVE  DS    18F                     mainline savearea
+DSASBSA  DS    18F                     subroutine savearea
+         DS    0X
+DSAFLG1  DS    XL1                     flags
+DSA@RV0  EQU   X'80'                   -available
+DSA@RV1  EQU   X'40'                   -available
+DSA@RV2  EQU   X'20'                   -available
+DSA@RV3  EQU   X'10'                   -available
+DSA@RV4  EQU   X'08'                   -available
+DSA@RV5  EQU   X'04'                   -available
+DSA@RV6  EQU   X'02'                   -available
+DSA@RV7  EQU   X'01'                   -available
+         DS    0X
+DSAVARID DS    CL1                     variable ID
+DSAFLGSX DS    XL2                     -available
+         DS    0F
+DSAIPAR  DS    F                       input PARM reg
+DSATXLN  DS    F                       WTO text length
+DSAROUT  DS    F                       ROUTCDE & DESC codes
+DSAEKEY  DS    F                       caller protect key
+DSAESPN  DS    F                       storage subpool
+         DS    0F
+DSAOPAR  DS    0XL12                   output parms
+DSARC    DS    F                       -R15 = RC
+DSARSN   DS    F                       -R0  = RSN
+DSAGR1   DS    F                       -R1  = output parm
+DSA@OPZL EQU   *-DSAOPAR               keep it together
+         DS    0C
+DSAMID   DS    CL8                     message ID
+         DS    0F
+DSASRC   DS    XL4                     variable source
+DSASRC2  DS    XL4                     variable source
+DSASRCL  EQU   *-DSASRC                variable length
+DSAVAR   DS    CL8                     variable data
+         DS    CL1                     slack byte
+DSAVARL  EQU   *-DSAVAR                variable length
+         DS    0D
+DSADWRD  DS    D                       conversion workarea
+DSAPACK  DS    PL4                     conversion workarea
+DSAPAK2  DS    PL4                     conversion workarea
+DSA@PSZE EQU   *-DSADWRD
+         DS    0F
+DSAWTO   DS    0CL124                  WTO message workarea
+DSAWLEN  DS    AL2                     -text length
+         DS    AL2                     -MCS flags
+DSAWSUB  DS    CL4                     -subsystem name
+         DS    CL3                     -message number
+         DS    CL1                     -blank
+DSAWTXT  DS    CL112                   -msg text
+DSAWTXTL EQU   *-DSAWTXT
+DSAWTOL  EQU   *-DSAWTO                WTO workarea size
+         DS    0F
+DSAXTXT  DS    CL112                   compress text workarea
+DSAXTXTL EQU   *-DSAXTXT               compress text workarea size
+         DS    0D
+DSA@SIZE EQU   *-DSA                   DSA size
+*---------------------------------------------------------------------*
+*        Subsystem Server data areas                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+         ZEVT  DSECT=YES,LIST=YES
+         END   ,

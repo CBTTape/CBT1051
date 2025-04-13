@@ -1,0 +1,122 @@
+         MACRO
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name:      ZWTO                                                 */
+.*/*                                                                 */
+.*/* Function:  Subsystem server message macro                       */
+.*/*                                                                 */
+.*/* Copyright: Ben Marino. 2021 - 2024 (unpublished)                */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @00 | V1R1 | 09242023 | Ben Marino  | Initial version              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+         ZWTO  &MID=,&EP=EMFMSG,&PLIST=DSAPLST,&ZEVT=,                 +
+               &V1=,&V2=,&V3=,&V4=,&V5=,&V6=,&V7=,&V8=,&V9=
+.*
+         LCLC  &MSG
+&MSG     SETC  'MSG'.'&SYSNDX'
+.*
+         AIF   ('&PLIST'(1,1) EQ '(').MSG00
+.*
+.**      subsystem service macro expansion
+.*
+         LAE   1,&PLIST                .listform
+         AGO   .MSG10
+.MSG00   ANOP  ,
+         LR    1,&PLIST                .listform
+.MSG10   ANOP  ,
+         AIF   ('&MID' EQ '').ERR01
+         AIF   ('&MID'(1,1) EQ '(').MSG20
+         LAE   0,=CL8'&MID'            .msgID
+         ST    0,0(,1)                 .set in parmlist
+         AGO   .MSG30
+.MSG20   ANOP  ,
+         ST    &MID,0(,1)              .msgID
+.MSG30   ANOP  ,
+         AIF   ('&V1' NE '').MSG40
+         OI    0(1),ENDVL              .set end-of-list
+         AGO   .MSG90
+.MSG40   ANOP  ,
+         LAE   0,&V1                   .variable text
+         ST    0,4(,1)                 .set in parmlist
+         AIF   ('&V2' NE '').MSG50
+         OI    4(1),ENDVL              .set end-of-list
+         AGO   .MSG90
+.MSG50   ANOP  ,
+         LAE   0,&V2                   .variable text
+         ST    0,8(,1)                 .set in parmlist
+         AIF   ('&V3' NE '').MSG60
+         OI    8(1),ENDVL              .set end-of-list
+         AGO   .MSG90
+.MSG60   ANOP  ,
+         LAE   0,&V3                   .variable text
+         ST    0,12(,1)                .set in parmlist
+         AIF   ('&V4' NE '').MSG70
+         OI    12(1),ENDVL             .set end-of-list
+         AGO   .MSG90
+.MSG70   ANOP  ,
+         LAE   0,&V4                   .variable text
+         ST    0,16(,1)                .set in parmlist
+         AIF   ('&V5' NE '').MSG80
+         OI    16(1),ENDVL             .set end-of-list
+         AGO   .MSG90
+.MSG80   ANOP  ,
+         LAE   0,&V5                   .variable text
+         ST    0,20(,1)                .set in parmlist
+         AIF   ('&V6' NE '').MSG81
+         OI    20(1),ENDVL             .set end-of-list
+         AGO   .MSG90
+.MSG81   ANOP  ,
+         LAE   0,&V6                   .variable text
+         ST    0,24(,1)                .set in parmlist
+         AIF   ('&V7' NE '').MSG82
+         OI    24(1),ENDVL             .set end-of-list
+         AGO   .MSG90
+.MSG82   ANOP  ,
+         LAE   0,&V7                   .variable text
+         ST    0,28(,1)                .set in parmlist
+         AIF   ('&V8' NE '').MSG83
+         OI    28(1),ENDVL             .set end-of-list
+         AGO   .MSG90
+.MSG83   ANOP  ,
+         LAE   0,&V8                   .variable text
+         ST    0,32(,1)                .set in parmlist
+         AIF   ('&V9' NE '').MSG84
+         OI    32(1),ENDVL             .set end-of-list
+         AGO   .MSG90
+.MSG84   ANOP  ,
+         LAE   0,&V9                   .variable text
+         ST    0,36(,1)                .set in parmlist
+         OI    36(1),ENDVL             .set end-of-list
+.*
+.MSG90   ANOP  ,
+         AIF   ('&EP' EQ 'EMFMSG').MSG99
+         L     15,&EP                  .EPA
+         BSM   15,0                    .set AMODE
+         BASR  14,15                   .issue WTO message
+         MEXIT ,
+.*
+.MSG99   ANOP  ,
+         AIF   ('&ZEVT' EQ 'READONLY').MSG999
+         L     15,=V(&EP)              .EPA
+         BSM   15,0                    .set AMODE
+         BASR  14,15                   .issue WTO message
+         MEXIT ,
+.*
+.MSG999  ANOP  ,
+         L     11,=V(EMFSRV)           .ZEVT
+         L     15,=V(EMFMSG)           .EPA
+         BSM   15,0                    .set AMODE
+         BASR  14,15                   .issue WTO message
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.ERR01   MNOTE 8,'*** ZWTO  - Invalid message ID specified'
+         MEND ,

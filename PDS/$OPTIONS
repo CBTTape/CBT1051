@@ -1,0 +1,59 @@
+*/*********************************************************************
+*/*
+*/*                          zEMF
+*/*                    SUBSYSTEM SERVER
+*/*                         OPTIONS
+*/*
+*/*
+*/* zEMF SUBSYSTEM SERVER OPTIONS:
+*/*  The following options are specified on the SUBSYS keyword
+*/*  of PARMLIB member IEFSSNxx or by the MVS SETSSI command:
+*/*
+*/*  IEFSSNxx EXAMPLE:
+*/*
+*/*   SUBSYS SUBNAME(ZEMF)
+*/*          INITRTN(ZEMFINI)
+*/*          INITPARM('LIB=SYS1.ZEMF.PARMLIB,MEM=ZEMFMSTR,TRC=ON')
+*/*
+*/*
+*/*  COMMAND EXAMPLE:
+*/*
+*/*   SETSSI ADD,SUB=ZEMF,I=ZEMFINI,
+*/*              P='LIB=SYS1.ZEMF.PARMLIB,MEM=ZEMFMSTR,TRC=ON'
+*/*
+*/*
+*/* zEMF OPTIONS:
+*/*
+*/*  LIB={DSname} Specifies the name of the zEMF initialization
+*/*               parameters PARMLIB dataset.
+*/*
+*/*  MEM={member} Specifies the zEMF initialization parameters
+*/*               member name. If not specified, the default member
+*/*               name is ZEMFMSTR.
+*/*
+*/*  SAF={NO|YES} Specifies if external security is required.
+*/*               SAF=YES invokes external security to check if
+*/*               the caller has authorization to issue action
+*/*               server commands. SAF=NO bypasses external security
+*/*               checks. If not specified, the default is SAF=NO.
+*/*
+*/*               Refer to INSTLIB($RACF) for security server
+*/*               implementation details.
+*/*
+*/*  DBG={ON|OFF} Specifies if debugging is ON or OFF.
+*/*               DBG=ON causes processing routines to issue code
+*/*               path informational WTO messages. If not specified,
+*/*               the default is DBG=OFF.
+*/*
+*/*  TRC={ON|OFF} Specifies if internal code tracing is ON or OFF.
+*/*               If not specified, the default is TRC=OFF.
+*/*
+*/*
+*/* CONTACT ME:
+*/*  Feel free to contact me if you have questions.
+*/*
+*/*  Ben Marino
+*/*  b2marino@outlook.com
+*/*
+*/*
+*/*********************************************************************

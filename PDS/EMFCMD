@@ -1,0 +1,2463 @@
+EMFCMD   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        EMFCMD                                              */
+*/*                                                                  */
+*/* Function:    ZEMF subsystem server command listener              */
+*/*                                                                  */
+*/* Description: Receives control from the SSI to process            */
+*/*              subsystem server commands.                          */
+*/*                                                                  */
+*/* Input Regs:  R0  SSCT address                                    */
+*/*              R1  SSOB address                                    */
+*/*              R13 savearea address                                */
+*/*              R14 return address                                  */
+*/*              R15 entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R5  CMD  address                                    */
+*/*              R6  SSCM address                                    */
+*/*              R7  SSCT address                                    */
+*/*              R8  SSOB address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R13 savearea address                                */
+*/*              R14 return address                                  */
+*/*              R15 return code                                     */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              Page fixed                                          */
+*/*              Write protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+EMFCMD   AMODE 31
+EMFCMD   RMODE ANY
+         COPY  ZGBLS
+         USING EMFCMD,R15              Entry
+         STM   R14,R12,GPR@R14(R13)    save caller regs
+         B     CMDMAIN                 branch
+         ZMACS GEN=MID,DSECT=NO        module ID
+*
+CMDMAIN  DS    0H
+         DROP  R15
+         LR    R10,R15                 base
+         USING EMFCMD,R10              addressability
+         LR    R7,R0                   SSCT
+         USING SSCT,R7
+         LR    R8,R1                   SSOB
+         USING SSOB,R8
+         L     R6,SSOBINDV             SSCM address
+         USING SSOBEXT,R6
+         LA    R3,SSCMSCMD             assume,
+         ST    R3,SSOBRETN             not a ZEMF command.
+         XR    R11,R11                 ZEVT not available
+*
+**       Obtain dynamic storage area
+*
+         IPK   ,
+         STORAGE OBTAIN,LOC=ANY,COND=YES,                              +
+               LENGTH=DSA@SIZE,SP=&SP230,KEY=(R2),LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BNZ   CMDXIT99                no, exit
+         LR    R12,R1                  DSA
+         USING DSA,R12
+         LA    R1,DSA@SIZE             DSA size
+         LR    R0,R12                  DSA address
+         XR    R15,R15                 zero
+         MVCL  R0,R14                  scrub DSA
+         ST    R13,GPR@BWD(,R12)
+         ST    R12,GPR@FWD(,R13)
+         LR    R13,R12                 savearea
+         ST    R2,DSAEKEY              caller key
+*
+**       Initialize recovery workarea
+*
+         L     R11,=V(EMFSRV)          readonly ZEVT
+         USING ZEVT,R11
+         TM    ZEVTFLG2,ZEVT@RCV       RCV=YES?
+         BZ    CMD0010                 no, skip recovery
+         DROP  R11
+         LA    R9,DSAZRWA
+         USING ZRWA,R9
+         MVC   ZRWAID,=CL4'ZRWA'       ID
+         MVC   ZRWAXMOD,MIDNAME        mainline
+         MVC   ZRWAXECT,MIDNAME        mainline
+*
+**       Establish listener recovery
+*
+         L     R3,=V(EMFRTM)           EMFRTM
+         BSM   R3,0                    AMODE
+         MVC   DSAPLST(ESTAEXL),ESTAEX
+         ESTAEX (R3),                                                  +
+               PARAM=(R9),             ZRWA                            +
+               TOKEN=DSATOKN,          store token here                +
+               MF=(E,DSAPLST)
+         LTR   R15,R15                 successful?
+         BNZ   CMDEXIT                 no, exit
+         OI    DSAFLG1,DSA@STAE        recovery established
+*
+**       Activate listener recovery
+*
+         ZRETRY CMDEXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               MOD=MIDNAME,            mainline                        +
+               SRV=MIDNAME,            mainline                        +
+               WTO=NO,                 no error msg                    +
+               DUMP=NO,                no SVC dump                     +
+               LOGREC=NO,              no LOGREC                       +
+               RSN==AL4(RSN32)         RSN
+*
+**       Validity check server status
+*
+CMD0010  DS    0H
+         L     R11,SSCTSUSE            ZEVT
+         USING ZEVT,R11
+         CLC   ZEVTID,=CL4'ZEVT'       valid?
+         BNE   CMDEXIT                 no
+         TM    ZEVTFLG1,ZEVT@INI       server initialized?
+         BZ    CMDEXIT                 no
+         TM    ZEVTFLG1,ZEVT@ACT       server active?
+         BZ    CMDEXIT                 no
+         ST    R11,ZRWAZEVT            init ZEVT for recovery
+         MVC   ZRWASUBN,ZEVTSUBN       init server name
+         ZTRCE CMD=0,LINKAGE=LOCAL     trace
+*
+**       Update listener entry count
+*
+CMD0020  DS    0H
+         L     R2,ZEVTCMDC             listeners count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTCMDC          update count
+         BNE   CMD0020                 changed: try again
+*
+**       Capture command origin data
+*
+         L     R4,SSCMBUFF             command buffer
+         LH    R3,0(,R4)               get buffer length
+         LTR   R3,R3                   null command?
+         BZ    CMDEXIT                 yes
+         LA    R1,DSA@CMDZ             max buffer length
+         CLR   R3,R1                   length exceeds max?
+         BNH   CMD0030                 no
+         LR    R3,R1                   max command length
+*
+CMD0030  DS    0H
+         MVC   DSASCID,SSCMSCID        command source
+         MVC   DSACNID,SSCMCNID        console ID
+         MVC   DSACART,SSCMCART        CART
+         MVC   DSACONS,SSCMSCNM        console name
+         MVC   DSACMDBF,ZEVTBLKS       clear command buffer
+         BCTR  R3,0
+         EX    R3,COPYCMND             copy command
+         CLI   DSACMDBL,BLANK          ZEMF prefix separator?
+         BNE   CMDEXIT                 no, exit
+         CLC   ZEVTSUBN,DSACMDID       ZEMF subsystem command?
+         BNE   CMDEXIT                 no, exit
+*
+**       Locate command listener
+*
+         LA    R5,CMDTABLE             command table
+         USING COMMAND,R5
+         ZTRCE CMD=1,LINKAGE=LOCAL     trace
+*
+CMD0040  DS    0H
+         CLC   CMDEPA,CMDTEND          EoT?
+         BE    CMD0070                 yes
+         LH    R1,CMDLEN               command length
+         BCTR  R1,0
+         EX    R1,CHECKCMD             command found?
+         BNE   CMD0060                 no
+         ST    R5,DSACMDA              save table entry
+         LA    R3,SSCMSUBC             it's,
+         ST    R3,SSOBRETN             our command.
+         ZTRCE CMD=2,LINKAGE=LOCAL     trace
+*
+**       Check caller authorization
+*
+         TM    ZEVTFLG2,ZEVT@SAF       SAF class?
+         BZ    CMD0050                 no
+         TM    CMDSAF,CMD@CALL         SAF=CALL?
+         BZ    CMD0050                 no
+         MVC   DSARACF,=AL4(2)         UACC=READ
+         MVC   DSACZSZE,ZEVTCSZE       CLASS name size
+         MVC   DSACZEMF,ZEVTCLAS       init CLASS name
+         MVI   DSAENTTY,BLANK
+         MVC   DSAENTTY+1(DSA@ENTL-1),DSAENTTY
+         MVC   DSAENTEL(SSAFNAMZ),SSAF profile length+name
+         LA    R1,DSA@ENTZ             profile buffer length
+         STH   R1,DSAENTBL             set buffer length
+         L     R2,DSARACF              UACC attribute
+         MVC   DSAROUTE(RACI@SZE),RACILST
+*
+         RACROUTE REQUEST=AUTH,                                        +
+               ENTITYX=DSAENTBF,       profile buffer                  +
+               CLASS=DSACLASS,         resource class                  +
+               ATTR=(2),               UACC attribute                  +
+               LOG=ASIS,               whatever                        +
+               RELEASE=1.9,            server release                  +
+               WORKA=DSAXWORK,         SAF workarea                    +
+               MF=(E,DSAROUTE)
+         ST    R15,DSAXRC              SAF RC
+         LA    R3,DSAROUTE             RACROUTE listform
+         USING SAFP,R3
+         MVC   DSARC,SAFPRRET          RACF RC
+         MVC   DSARSN,SAFPRREA         RACF RSN
+         CLC   DSAXRC,=AL4(RC0)        SAF RC okay?
+         BNE   CMD0099                 no
+         CLC   DSARC,=AL4(RC0)         RACF authorized?
+         BNE   CMD0099                 no
+         ZTRCE CMD=3,LINKAGE=LOCAL     trace
+         DROP  R3
+*
+**       Call command listener routine
+*
+CMD0050  DS    0H
+         L     R15,CMDEPA              EPA
+         BSM   R15,0                   set AMODE
+         BASR  R14,R15                 process command
+*
+**       Reset listener retry address
+*
+         ZRETRY CMDEXIT,               retry address                   +
+               ZRWA=DSAZRWA,           ZRWA                            +
+               MOD=MIDNAME,            mainline                        +
+               SRV=MIDNAME,            module ID                       +
+               WTO=NO,                 issue error msg                 +
+               DUMP=NO,                take SVC dump                   +
+               LOGREC=NO,              no LOGREC                       +
+               RSN==AL4(RSN32)         RSN
+         ZTRCE CMD=4,LINKAGE=LOCAL     trace
+         B     CMDEXIT                 exit
+*
+CMD0060  DS    0H
+         LA    R5,CMD@SZE(,R5)         next command entry
+         B     CMD0040                 loop
+*
+**       Issue invalid command msgs
+*
+CMD0070  DS    0H
+         ZWTO  MID=ZEMF18E,V1=DSACMDBF command invalid
+         ZWTO  MID=ZEMF19E,V1=DSACMDID command help
+         ZTRCE CMD=5,LINKAGE=LOCAL     trace
+         B     CMDEXIT                 exit
+*
+**       issue Command authorization failed msg
+*
+CMD0099  DS    0H
+         ZWTO  MID=ZEMF15E,                                            +
+               V1=DSAXRC,              show SAF RC                     +
+               V2=DSAXRC,              show security server RC         +
+               V3=DSAXRC,              show security server DSN        +
+               V4=DSACMDBF             show command verb * data
+         ZTRCE CMD=6,LINKAGE=LOCAL     trace
+*---------------------------------------------------------------------*
+*        Exit Routine                                                 *
+*--------+---------+---------+---------+---------+---------+---------+*
+CMDEXIT  DS    0H
+         TM    DSAFLG1,DSA@STAE        recovery active?
+         BZ    CMDXIT00                no
+         ESTAEX 0,TOKEN=DSATOKN        deactivate recovery
+         ZTRCE CMD=7,LINKAGE=LOCAL     trace
+*
+CMDXIT00 DS    0H
+         L     R2,DSAEKEY              caller key
+         L     R13,GPR@BWD(,R13)       caller savearea
+         STORAGE RELEASE,COND=NO,SP=&SP230,KEY=(R2),                   +
+               ADDR=(R12),LENGTH=DSA@SIZE,LINKAGE=SYSTEM
+         ZTRCE CMD=8,LINKAGE=LOCAL     trace
+*
+CMDXIT99 DS    0H
+         LM    R14,R12,GPR@R14(R13)    restore caller regs
+         XR    R15,R15                 RC
+         BR    R14                     return
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYCMND MVC   DSACMDBF(*-*),4(R4)
+CHECKCMD CLC   DSACMDTA(*-*),CMDTEXT
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ESTAEX   ESTAEX 0,MF=L                 listform
+ESTAEXL  EQU   *-ESTAEX
+MLWTOTAB DS    0F
+         ZTABS GEN=WTO,DSECT=NO,T=MSX  MLWTO table
+*---------------------------------------------------------------------*
+*        RACROUTE Listform                                            *
+*--------+---------+---------+---------+---------+---------+---------+*
+SSAF     DS    0F
+SSAFLEN  DC    AL2(SSAFNAML)
+SSAFNAME DC    C'ZEMF.SERVER.CMD'
+SSAFNAML EQU   *-SSAFNAME
+SSAFNAMZ EQU   *-SSAF
+         DS    0F
+RACILST  RACROUTE REQUEST=AUTH,CLASS=0,ENTITYX=0,RELEASE=1.9,MF=L
+RACI@SZE EQU   *-RACILST
+*---------------------------------------------------------------------*
+*        Command Routine Table                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+CMDTABLE DS    0F
+         ZTABS GEN=CMD,TYPE=INITIAL
+*
+**       SAF=CALL command routines
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=TRCCMD,                routine EPA                   +
+               SAF=CALL,                 authorization required        +
+               LENGTH=4,                 length                        +
+               COMMAND='TRC='            TRC={ON|OFF}
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=DBGCMD,                routine EPA                   +
+               SAF=CALL,                 authorization required        +
+               LENGTH=4,                 length                        +
+               COMMAND='DBG='            DBG={ON|OFF}
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=RCVCMD,                routine EPA                   +
+               SAF=CALL,                 authorization required        +
+               LENGTH=4,                 length                        +
+               COMMAND='RCV='            RCV={NO|YES}
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=MODIFY,                routine EPA                   +
+               SAF=CALL,                 authorization not required    +
+               LENGTH=5,                 length                        +
+               COMMAND='EXIT='           EXIT=name,STATUS=status
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=SHUTDOWN,              routine EPA                   +
+               SAF=CALL,                 authorization required        +
+               LENGTH=9,                 length                        +
+               COMMAND='SHUTDOWN'        SHUTDOWN
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=TRCLR,                 routine EPA                   +
+               SAF=CALL,                 authorization required        +
+               LENGTH=12,                length                        +
+               COMMAND='TRACE=CLEAR'     TRACE
+*
+**       SAF=NOCALL command routines
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=STATUS,                routine EPA                   +
+               SAF=NOCALL,               authorization not required    +
+               LENGTH=7,                 length                        +
+               COMMAND='STATUS'          STATUS
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=OPTIONS,               routine EPA                   +
+               SAF=NOCALL,               authorization not required    +
+               LENGTH=8,                 length                        +
+               COMMAND='OPTIONS'         OPTIONS
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=EXITS,                 routine EPA                   +
+               SAF=NOCALL,               authorization not required    +
+               LENGTH=6,                 length                        +
+               COMMAND='EXITS'           EXITS
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=TRACE,                 routine EPA                   +
+               SAF=NOCALL,               authorization not required    +
+               LENGTH=6,                 length                        +
+               COMMAND='TRACE'           TRACE
+*
+         ZTABS GEN=CMD,                                                +
+               TYPE=ENTRY,                                             +
+               EP=HELP,                  routine EPA                   +
+               SAF=NOCALL,               authorization not required    +
+               LENGTH=5,                 length                        +
+               COMMAND='HELP'            HELP
+*
+         ZTABS GEN=CMD,TYPE=FINAL
+*
+CMD@SIZE EQU   *-CMDTABLE
+         DS    0F
+CMDTEND  DC    AL4(-1)                   end-of-table marker
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        TRCCMD                                              */
+*/*                                                                  */
+*/* Function:    TRC={ON|OFF} command routine                        */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+TRCCMD   ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Set command operand data
+*
+         L     R4,DSACMDA              table entry address
+         USING COMMAND,R4
+         LH    R1,CMDLEN               command name length
+         DROP  R4
+         LA    R3,DSACMDTA             command buffer
+         LA    R3,0(R1,R3)             command operands
+*
+**       Process TRC=ON command
+*
+         CLC   =CL3'ON',0(R3)          TRC=ON?
+         BNE   TRCC000                 no
+         OI    ZEVTFLG2,ZEVT@TRC       set TRC=ON
+         ZWTO  MID=ZEMF12I,                                            +
+               V1==CL3'TRC',                                           +
+               V2==CL3'ON'
+         B     TRCCXIT                 exit
+*
+**       Process TRC=OFF command
+*
+TRCC000  DS    0H
+         CLC   =CL4'OFF',0(R3)         TRC=OFF?
+         BNE   TRCC010                 no, error
+         NI    ZEVTFLG2,XFF-ZEVT@TRC   set TRC=OFF
+         ZWTO  MID=ZEMF12I,                                            +
+               V1==CL3'TRC',                                           +
+               V2==CL3'OFF'
+         B     TRCCXIT                 exit
+*
+**       Invalid TRC command issued
+*
+TRCC010  DS    0H
+         ZWTO  MID=ZEMF13E,            error msg                       +
+               V1=DSACMDTA             show command
+*
+TRCCXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        DBGCMD                                              */
+*/*                                                                  */
+*/* Function:    DBG={ON|OFF} command routine                        */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+DBGCMD   ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Set command operand data
+*
+         L     R4,DSACMDA              table entry address
+         USING COMMAND,R4
+         LH    R1,CMDLEN               command name length
+         DROP  R4
+         LA    R3,DSACMDTA             command buffer
+         LA    R3,0(R1,R3)             command operands
+*
+**       Process DBG=ON command
+*
+         CLC   =CL3'ON',0(R3)          DBG=ON?
+         BNE   DBGC000                 no
+         OI    ZEVTFLG2,ZEVT@DBG       set DBG=ON
+         ZWTO  MID=ZEMF12I,                                            +
+               V1==CL3'DBG',                                           +
+               V2==CL3'ON'
+         B     DBGCXIT                 exit
+*
+**       Process DBG=OFF command
+*
+DBGC000  DS    0H
+         CLC   =CL4'OFF',0(R3)         DBG=OFF?
+         BNE   DBGC010                 no, error
+         NI    ZEVTFLG2,XFF-ZEVT@DBG   set DBG=OFF
+         ZWTO  MID=ZEMF12I,                                            +
+               V1==CL3'DBG',                                           +
+               V2==CL3'OFF'
+         B     DBGCXIT                 exit
+*
+**       Invalid DBG command issued
+*
+DBGC010  DS    0H
+         ZWTO  MID=ZEMF13E,            error msg                       +
+               V1=DSACMDTA             show command
+*
+DBGCXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        RCVCMD                                              */
+*/*                                                                  */
+*/* Function:    RCV={NO|YES} command routine                        */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+RCVCMD   ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Set command operand data
+*
+         L     R4,DSACMDA              table entry address
+         USING COMMAND,R4
+         LH    R1,CMDLEN               command name length
+         DROP  R4
+         LA    R3,DSACMDTA             command buffer
+         LA    R3,0(R1,R3)             command operands
+*
+**       Process RCV=NO command
+*
+         CLC   =CL3'NO',0(R3)          RCV=NO?
+         BNE   RCVC000                 no
+         NI    ZEVTFLG2,XFF-ZEVT@RCV   set RCV=NO
+         ZWTO  MID=ZEMF12I,                                            +
+               V1==CL3'RCV',                                           +
+               V2==CL3'NO'
+         B     RCVCXIT                 exit
+*
+**       Process RCV=YES command
+*
+RCVC000  DS    0H
+         CLC   =CL4'YES',0(R3)         RCV=YES?
+         BNE   RCVC010                 no, error
+         OI    ZEVTFLG2,ZEVT@RCV       set RCV=YES
+         ZWTO  MID=ZEMF12I,                                            +
+               V1==CL3'RCV',                                           +
+               V2==CL3'YES'
+         B     RCVCXIT                 exit
+*
+**       Invalid RCV command issued
+*
+RCVC010  DS    0H
+         ZWTO  MID=ZEMF13E,            error msg                       +
+               V1=DSACMDTA             show command
+*
+RCVCXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        SHUTDOWN                                            */
+*/*                                                                  */
+*/* Function:    Server shutdown command routine                     */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  XSA address                                     */
+*/*              R8  SSCT address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+SHUTDOWN ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Server shutdown in progress
+*
+         ZWTO  MID=ZEMF97I,V1=ZEVTSUBN
+*
+**       Initialize XSA block
+*
+         LA    R7,DSAXSAWA             XSA
+         USING XSA,R7
+         XC    XSA(XSACLEAR),XSA       scrub XSA
+         MVC   XSAID,=CL4'XSA'         ID
+         ZTRCE CMD=A,LINKAGE=LOCAL     trace
+*
+**       Deactivate SSI listeners
+*
+         ICM   R8,15,ZEVTSSCT          SSCT init?
+         BZ    SHUT000                 no
+         USING SSCT,R8
+         CLC   SSCTID,=CL4'SSCT'       SSCT?
+         BNE   SHUT000                 no
+         XC    SSCTSSVT,SSCTSSVT       deactivate listeners
+         ZTRCE CMD=B,LINKAGE=LOCAL     trace
+*
+**       Issue SETSSI delete command
+*
+         MVC   DSAPLST(COMMBTXL),COMMTXT
+         MVC   DSAPLST+22(4),ZEVTSUBN  subsystem name
+         XR    R0,R0                   console ID
+         MGCR  DSAPLST                 issue command
+*
+**       Modify dynamic exit state
+*
+SHUT000  DS    0H
+         OI    XSAFLG1,XSA@SHUT        set shutdown request
+         ZCALL SRV=ZEVTDELX,(R7)       DELEXIT EPA
+         LTR   R15,R15                 successful?
+         BZ    SHUT010                 yes
+         ZTRCE CMD=C,LINKAGE=LOCAL     trace
+*
+**       Wait a few seconds
+*
+SHUT010  DS    0H
+         LA    R3,15                   15 seconds timer
+         NI    ZEVTFLG1,XFF-ZEVT@ACT   reset active indicator
+         ZTRCE CMD=D,LINKAGE=LOCAL     trace
+*
+SHUT020  DS    0H
+         ICM   R1,15,ZEVTXACT          in-flight exits?
+         BZ    SHUT030                 no
+         STIMER WAIT,DINTVL=SHUT1SEC   wait a second
+         OI    DSAFLG1,DSA@XACT        active exits indicator
+         BCT   R3,SHUT020              yes, wait a second
+         ZTRCE CMD=E,LINKAGE=LOCAL     trace
+*
+**       Set shutdown indicators
+*
+SHUT030  DS    0H
+         OI    ZEVTFLG1,ZEVT@TRM       set termination indicator
+         OI    ZEVTFLG1,ZEVT@DWN       set shutdown indicator
+         TM    DSAFLG1,DSA@XACT        active exits?
+         BZ    SHUT099                 yes
+         STIMER WAIT,DINTVL=SHUT5SEC   wait 10 seconds
+         ZTRCE CMD=F,LINKAGE=LOCAL     trace
+*
+**       Server shutdown complete
+*
+SHUT099  DS    0H
+         ZWTO  MID=ZEMF98I,V1=ZEVTSUBN
+         ZTRCE CMD=G,LINKAGE=LOCAL     trace
+*
+SHUTXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        MGCR listform                                                *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+COMMTXT  DS    0XL80
+         DC    AL2(COMMBTXL)
+         DC    AL2(0)
+COMMTXD  DC    CL76'SETSSI DELETE,SUB=ZEMF,FORCE'
+COMMTXDL EQU   *-COMMTXD
+COMMBTXL EQU   *-COMMTXT
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0D
+SHUT1SEC DC    CL8'00000100'           hhmmssth
+SHUT5SEC DC    CL8'00000500'           hhmmssth
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        MODIFY                                              */
+*/*                                                                  */
+*/* Function:    MODIFY Dynamic Exit routine                         */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  MSTE address                                    */
+*/*              R8  XSA  address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+MODIFY   ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Initialize XSA block
+*
+         LA    R8,DSAXSAWA             XSA
+         USING XSA,R8
+         XC    XSA(XSACLEAR),XSA       scrub XSA
+         MVC   XSAID,=CL4'XSA'         ID
+         ZTRCE CMD=H,LINKAGE=LOCAL     trace
+*
+**       Set command operand data
+*
+         L     R4,DSACMDA              table entry address
+         USING COMMAND,R4
+         LH    R1,CMDLEN               command name length
+         LA    R3,DSACMDTA             command buffer
+         LA    R3,0(R1,R3)             command operands
+         ZTRCE CMD=I,LINKAGE=LOCAL     trace
+         DROP  R4
+*
+**       Parse supplied exit name
+*
+         LR    R4,R3                   copy address
+         LA    R2,9                    loop value
+         MVC   XSAEXIT,ZEVTBLKS        clear exit name
+         MVC   XSASTATE,ZEVTBLKS       clear exit state
+         ZTRCE CMD=J,LINKAGE=LOCAL     trace
+*
+MODC000  DS    0H
+         CLI   0(R3),COMMA             end of name?
+         BE    MODC010                 yes
+         LA    R3,1(,R3)               walk thru parm
+         BCT   R2,MODC000              loop
+         ZTRCE CMD=K,LINKAGE=LOCAL     trace
+*
+MODC010  DS    0H
+         SLR   R3,R4                   valid exit name?
+         BZ    MODC099                 no, error
+         BCTR  R3,0                    EX
+         EX    R3,COPYXIT              copy exit name
+         MVC   DSAEXIT,XSAEXIT         copy exit name locally
+*
+**       Validity check all exits request
+*
+         OI    XSAFLG2,XSA@ALLX        assume all exits
+         CLC   XSAEXIT,=CL8'*'         all exits?
+         BE    MODC020                 yes
+         CLC   XSAEXIT,=CL8'ALL'       all exits?
+         BE    MODC020                 yes
+         CLC   XSAEXIT,=CL8'ALLEXITS'  all exits?
+         BE    MODC020                 yes
+         NI    XSAFLG2,XFF-XSA@ALLX    no, single exit
+         ZTRCE CMD=L,LINKAGE=LOCAL     trace
+*
+**       Parse supplied exit state
+*
+MODC020  DS    0H
+         LA    R4,1(R3,R4)             next keyword
+         CLC   STATEID,0(R4)           STATE=?
+         BNE   MODC099                 no, error
+         LA    R4,L'STATEID(,R4)       skip keyword
+         MVC   XSASTATE,0(R4)          copy state
+         MVC   DSASTATE,XSASTATE       copy state locally
+         CLC   XSASTATE,=CL8'ACTIVE'   active?
+         BNE   MODC030                 no
+         OI    XSAFLG2,XSA@ACTX        active indicator
+         ZTRCE CMD=M,LINKAGE=LOCAL     trace
+         BE    MODC040                 yes
+*
+MODC030  DS    0H
+         CLC   XSASTATE,=CL8'INACTIVE' inactive?
+         BNE   MODC099                 no, error
+         OI    XSAFLG2,XSA@INAX        inactive indicator
+         ZTRCE CMD=N,LINKAGE=LOCAL     trace
+*
+**       Modify dynamic exit state
+*
+MODC040  DS    0H
+         OI    XSAFLG1,XSA@MODF        set modify request
+         ZCALL SRV=ZEVTMODX,(R8)       MODEXIT EPA
+         LTR   R15,R15                 successful?
+         BNZ   MODC050                 no
+         TM    XSAFLG2,XSA@XQEC        ZXQE queue(s) changed?
+         BZ    MODC050                 no
+         ZTRCE CMD=O,LINKAGE=LOCAL     trace
+         B     MODCXIT                 exit
+*
+MODC050  DS    0H
+         TM    XSAFLG1,XSA@NFND        ZEMF41E issued?
+         BNZ   MODCXIT                 yes, skip ZEMF13E msg
+         ZTRCE CMD=P,LINKAGE=LOCAL     trace
+*
+**       Issue invalid command msg
+*
+MODC099  DS    0H
+         ZWTO  MID=ZEMF13E,            error msg                       +
+               V1=DSACMDTA             show command
+         ZTRCE CMD=Q,LINKAGE=LOCAL     trace
+*
+MODCXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+COPYXIT  MVC   XSAEXIT(*-*),0(R4)
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+EXITID   DC    CL5'EXIT='
+STATEID  DC    CL7',STATE='
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        STATUS                                              */
+*/*                                                                  */
+*/* Function:    STATUS display command routine                      */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+STATUS   ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Storage obtain MLWTO buffer
+*
+         L     R2,DSAEKEY              caller key
+         L     R3,=AL4(255*80)         max MLWTO lines
+         ST    R3,DSAWSIZE             save table size
+         STORAGE OBTAIN,LOC=ANY,COND=YES,                              +
+               LENGTH=(R3),SP=&SP230,KEY=(R2),LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BZ    STAT000                 yes
+         ST    R15,DSARC               save RC
+         ZWTO  MID=ZEMF20E,V1==CL3'230',V2=DSARC
+         B     STATXIT                 exit
+*
+**       Init control message line
+*
+STAT000  DS    0H
+         ST    R1,DSAWBUFF             save buffer address
+         LR    R6,R1                   buffer address
+         USING MSGC,R6                 addressability
+         XR    R5,R5                   zero lines
+         L     R1,=A(MSXC)             control line model
+         MVC   MSGC(MSGC@SZE),0(R1)    init control line model
+         MVC   MSGCTSUB,ZEVTSUBN       init subsystem name
+         MVC   MSGCTCMD,DSACMDTA       init command data
+         LA    R5,1(,R5)               increment lines
+*
+**       Display server status
+*
+         LA    R6,MSGC@SZE(,R6)        next data line
+         USING MSGD,R6                 addressability
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             line address
+         USING STS,R4                  addressability
+         MVC   STSLINE,ZSTS            init status line
+         MVC   STSDAV1,=CL8'Active'
+         TM    ZEVTFLG1,ZEVT@ACT       subsystem active?
+         BNZ   STAT010                 yes
+         MVC   STSDAV1,=CL8'Inactive'
+         TM    ZEVTFLG1,ZEVT@TRM       subsystem inactive?
+         BNZ   STAT010                 yes
+         MVC   STSDAV1,=CL8'ABENDed'
+         TM    ZEVTFLG1,ZEVT@ABN       subsystem ABENDed?
+         BNZ   STAT010                 yes
+         MVC   STSDAV1,=CL8'Unknown'
+*
+STAT010  DS    0H
+         LA    R5,1(,R5)               increment lines
+*
+**       Display Server start date & time
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         USING MSGD,R6                 addressability
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             line address
+         USING TMAP,R4                 set addressability
+         MVC   TIMLINE,ZSTR            init server start line
+         MVC   TIMESTR,TMODEL          time & date skeleton
+         MVC   DSAWORD,ZEVTOSTK        time
+         ZMACS GEN=CNVX,DSAVAR,DSAWORD
+         MVC   TIMEHH,DSAVAR           show hours
+         MVC   TIMEMM,DSAVAR+2         show minutes
+         MVC   TIMESS,DSAVAR+4         show seconds
+         MVC   TIMETH,DSAVAR+6         show hundreds
+         MVC   DSAWORD,ZEVTOSTK+8      date
+         ZMACS GEN=CNVX,DSAVAR,DSAWORD
+         MVC   DATEMM,DSAVAR           month
+         MVC   DATEDD,DSAVAR+2         day
+         MVC   DATEYY,DSAVAR+4         year
+         LA    R5,1(,R5)               increment lines
+*
+**       Display server residency
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         USING STS,R4                  addressability
+         MVC   STSLINE,ZRES            init residency line
+         MVC   STSDATA(12),=CL12'Dynamic-LPA' residency
+         LA    R5,1(,R5)               increment lines
+*
+**       Display server common service module
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZCOM            init module line
+         MVC   STSDAV1(8),=CL8'EMFCSM' init module name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display server initialization module
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZINI            init module line
+         MVC   STSDAV1(8),=CL8'EMFINI' init module name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display server initialization PARMLIB
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZPLB            init PARMLIB line
+         MVC   STSDAV1(44),ZEVTPLIB    init PARMLIB name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display server initialization member
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZMEM            init member line
+         MVC   STSDAV1(8),ZEVTMSTR     init member name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display server ZEVT vector
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZTAB              vector table line
+         ZMACS GEN=CNVX,DSAVAR,ZEVTZEVT  vector table address
+         MVC   STSDAV1(8),DSAVAR       show it
+         LA    R5,1(,R5)               increment lines
+*
+**       Display SAF authorization class
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZSAF            init class line
+         MVC   STSDAV1,ZEVTCLAS        SAF authorization class
+         LA    R5,1(,R5)               increment lines
+*
+**       Display EOM listener events
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZEOM            init data line
+         ZMACS GEN=CNVD,DSAVAR,ZEVTEOMC
+         MVC   STSDAV1,DSAVAR          show count
+         LA    R5,1(,R5)               increment lines
+*
+**       Display MGCR/E listener events
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZCMD            init data line
+         ZMACS GEN=CNVD,DSAVAR,ZEVTCMDC
+         MVC   STSDAV1,DSAVAR          show count
+         LA    R5,1(,R5)               increment lines
+*
+**       Display dynamic exits listener
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZXXT            init data line
+         ZMACS GEN=CNVD,DSAVAR,ZEVTXITC
+         MVC   STSDAV1,DSAVAR          show count
+         LA    R5,1(,R5)               increment lines
+*
+**       Display dynamic MSTE Table
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZMST            init data line
+         ZMACS GEN=CNVX,DSAVAR,ZEVTMSTE
+         MVC   STSDAV1,DSAVAR          show count
+         LA    R5,1(,R5)               increment lines
+*
+**       Display in-flight exits count
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZFLT            init data line
+         ZMACS GEN=CNVD,DSAVAR,ZEVTXACT
+         MVC   STSDAV1,DSAVAR          show count
+         LA    R5,1(,R5)               increment lines
+*
+**       Display system-level token name
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             next data line
+         MVC   STSLINE,ZTOK            init data line
+         MVC   STSTOKN,ZEVTPRTK        init token name
+         LA    R5,1(,R5)               increment lines
+*
+**       Initialize END message line
+*
+         LA    R6,MSGD@SZE(,R6)        end line address
+         USING MSGE,R6                 addressability
+         L     R1,=A(MSXE)             END line model
+         MVC   MSGE(MSGE@SZE),0(R1)    init end line model
+         LA    R5,1(,R5)               increment lines
+*
+**       Set number of lines to display
+*
+         L     R6,DSAWBUFF             control line address
+         USING MSGC,R6                 addressability
+         ST    R5,DSAWLINE             set number of lines
+         STC   R5,MSGCTOTL             init display lines
+*
+**       Display MLWTO message lines
+*
+         XR    R0,R0                   console ID
+         WTO   MF=(E,(R6))             issue MLWTO
+         ST    R1,DSAWID               save returned ID
+         ST    R15,DSARC               save RC
+         LTR   R15,R15                 successful?
+         BZ    STAT099                 yes
+*
+**       MLWTO message display failed
+*
+         ZWTO  MID=ZEMF14E,                                            +
+               V1=DSARC,               show RC                         +
+               V2=DSAWID               show returned ID
+*
+**       Storage release MLWTO buffer
+*
+STAT099  DS    0H
+         ICM   R1,15,DSAWBUFF          storage release required?
+         BZ    STATXIT                 no
+         L     R0,DSAWSIZE             buffer size
+         XC    DSAWBUFF,DSAWBUFF       zero buffer address
+         L     R2,DSAEKEY              caller key
+         STORAGE RELEASE,ADDR=(R1),KEY=(R2),                           +
+               LENGTH=(R0),SP=&SP230,LINKAGE=SYSTEM
+*
+STATXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+STSTAB   DS    0C
+ZSTS     DC    CL70' Subsystem Server Status ..........'
+ZSTR     DC    CL70'  Local Start Time ................'
+ZRES     DC    CL70'  Residency .......................'
+ZCOM     DC    CL70'  Common Services .................'
+ZINI     DC    CL70'  Server Initialization ...........'
+ZPLB     DC    CL70'  Initialization PARMLIB ..........'
+ZMEM     DC    CL70'  Initialization PARMLIB Member ...'
+ZTAB     DC    CL70'  ZEVT Vector Table ...............'
+ZSAF     DC    CL70'  Security Server Class ...........'
+ZEOM     DC    CL70'  End-of-Memory Listener ..........'
+ZCMD     DC    CL70'  Command Listener ................'
+ZXXT     DC    CL70'  Dynamic Exits Listener ..........'
+ZMST     DC    CL70'  Dynamic Exits Control Table .....'
+ZFLT     DC    CL70'  In-Flight Exits .................'
+ZTOK     DC    CL70'  Persistent System-Level Token ...'
+STS@SZE  EQU   *-ZFLT
+STS@NUME EQU   (*-STSTAB)/STS@SZE
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+TMODEL   DC    CL34'hh:mm:ss:th mm/dd/yyyy'
+TMODL@SZ EQU   *-TMODEL
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        OPTIONS                                             */
+*/*                                                                  */
+*/* Function:    OPTIONS display command routine                     */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+OPTIONS  ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Storage obtain MLWTO buffer
+*
+         L     R2,DSAEKEY              caller key
+         L     R3,=AL4(255*72)         max MLWTO lines
+         ST    R3,DSAWSIZE             save table size
+         STORAGE OBTAIN,LOC=ANY,COND=YES,                              +
+               LENGTH=(R3),SP=&SP230,KEY=(R2),LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BZ    OPTS000                 yes
+         ST    R15,DSARC               save RC
+         ZWTO  MID=ZEMF20E,V1==CL3'230',V2=DSARC
+         B     OPTSXIT                 exit
+*
+**       Init control message line
+*
+OPTS000  DS    0H
+         ST    R1,DSAWBUFF             save buffer address
+         LR    R6,R1                   buffer address
+         USING MSGC,R6                 addressability
+         XR    R5,R5                   zero lines
+         L     R1,=A(MSXC)             control line model
+         MVC   MSGC(MSGC@SZE),0(R1)    init control line model
+         MVC   MSGCTSUB,ZEVTSUBN       init subsystem name
+         MVC   MSGCTCMD,DSACMDTA       init command data
+         MVC   MSGCTMID(4),ZEVTSUBN    init msgID w/subsystem name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display initialization options
+*
+         LA    R6,MSGC@SZE(,R6)        next data line
+         USING MSGD,R6                 addressability
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             line address
+         USING OPT,R4                  addressability
+         MVC   OPTLINE,OPTS            init status line
+         LA    R5,1(,R5)               increment lines
+*
+**       Display DBG= server option
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   OPTLINE,ODBG            init trace line
+         MVC   OPTDATA(3),=CL3'ON'
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   OPTS010                 yes
+         MVC   OPTDATA(3),=CL3'OFF'    no
+*
+**       Display TRC= server option
+*
+OPTS010  DS    0H
+         LA    R5,1(,R5)               increment lines
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   OPTLINE,OTRC            init trace line
+         MVC   OPTDATA(3),=CL3'ON'
+         TM    ZEVTFLG2,ZEVT@TRC       TRC=ON?
+         BNZ   OPTS020                 yes
+         MVC   OPTDATA(3),=CL3'OFF'    no
+*
+**       Display RCV= option option
+*
+OPTS020  DS    0H
+         LA    R5,1(,R5)               increment lines
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   OPTLINE,ORCV            init trace line
+         MVC   OPTDATA(3),=CL3'NO'
+         TM    ZEVTFLG2,ZEVT@RCV       RCV=NO?
+         BZ    OPTS030                 yes
+         MVC   OPTDATA(3),=CL3'YES'    no
+*
+**       Display TST= option option
+*
+OPTS030  DS    0H
+         LA    R5,1(,R5)               increment lines
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   OPTLINE,OTST            init trace line
+         MVC   OPTDATA(8),ZEVTEXIT     init testing data value
+         LA    R5,1(,R5)               increment lines
+*
+**       Display SAF= option option
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   OPTLINE,OSAF            init trace line
+         MVC   OPTDATA(8),ZEVTCLAS     init SAF class
+         LA    R5,1(,R5)               increment lines
+*
+**       Display LIB= option option
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   OPTLINE,OLIB            init trace line
+         MVC   OPTDATA(44),ZEVTPLIB    init PARMLIB PDS name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display MEM= option option
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   OPTLINE,OMEM            init trace line
+         MVC   OPTDATA(8),ZEVTMSTR     init PARMLIB member name
+         LA    R5,1(,R5)               increment lines
+*
+**       Initialize END message line
+*
+         LA    R6,MSGD@SZE(,R6)        end line address
+         USING MSGE,R6                 addressability
+         L     R1,=A(MSXE)             END line model
+         MVC   MSGE(MSGE@SZE),0(R1)    init end line model
+         LA    R5,1(,R5)               increment lines
+*
+**       Set number of lines to display
+*
+         L     R6,DSAWBUFF             control line address
+         USING MSGC,R6                 addressability
+         ST    R5,DSAWLINE             set number of lines
+         STC   R5,MSGCTOTL             init display lines
+*
+**       Display MLWTO message lines
+*
+         XR    R0,R0                   console ID
+         WTO   MF=(E,(R6))             issue MLWTO
+         ST    R1,DSAWID               save returned ID
+         ST    R15,DSARC               save RC
+         LTR   R15,R15                 successful?
+         BZ    OPTS099                 yes
+*
+**       MLWTO message display failed
+*
+         ZWTO  MID=ZEMF14E,                                            +
+               V1=DSARC,               show RC                         +
+               V2=DSAWID               show returned ID
+*
+**       Storage release MLWTO buffer
+*
+OPTS099  DS    0H
+         ICM   R1,15,DSAWBUFF          storage release required?
+         BZ    OPTSXIT                 no
+         L     R0,DSAWSIZE             buffer size
+         XC    DSAWBUFF,DSAWBUFF       zero buffer address
+         L     R2,DSAEKEY              caller key
+         STORAGE RELEASE,ADDR=(R1),KEY=(R2),                           +
+               LENGTH=(R0),SP=&SP230,LINKAGE=SYSTEM
+*
+OPTSXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+OPTSTAB  DS    0C
+OPTS     DC    CL70' Subsystem Server Options'
+ODBG     DC    CL70'  DBG  ='
+OTRC     DC    CL70'  TRC  ='
+ORCV     DC    CL70'  RCV  ='
+OTST     DC    CL70'  TST  ='
+OSAF     DC    CL70'  SAF  ='
+OLIB     DC    CL70'  LIB  ='
+OMEM     DC    CL70'  MEM  ='
+OPT@SZE  EQU   *-OMEM
+OPT@NUME EQU   (*-OPTSTAB)/OPT@SZE
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        EXITS                                               */
+*/*                                                                  */
+*/* Function:    EXITS display command routine                       */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  DYNX address                                    */
+*/*              R8  MSTE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+EXITS    ZMACS GEN=SUBENTY             entry
+         USING DYNX,R7
+         USING MSTE,R8
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Storage obtain MLWTO buffer
+*
+         L     R2,DSAEKEY              caller key
+         L     R3,=AL4(255*80)         max MLWTO lines
+         ST    R3,DSAWSIZE             save table size
+         STORAGE OBTAIN,LOC=ANY,COND=YES,                              +
+               LENGTH=(R3),SP=&SP230,KEY=(R2),LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BZ    XXIT000                 yes
+         ST    R15,DSARC               save RC
+         ZWTO  MID=ZEMF20E,V1==CL3'230',V2=DSARC
+         B     XXITXIT                 exit
+*
+**       Init control message line
+*
+XXIT000  DS    0H
+         ST    R1,DSAWBUFF             save buffer address
+         LR    R6,R1                   buffer address
+         USING MSGC,R6
+         XR    R5,R5                   zero lines
+         L     R1,=A(MSXC)             control line model
+         MVC   MSGC(MSGC@SZE),0(R1)    init control line model
+         MVC   MSGCTSUB,ZEVTSUBN       init subsystem name
+         MVC   MSGCTCMD,DSACMDTA       init command data
+         LA    R5,1(,R5)               increment lines
+*
+**       Display dynamic exits title
+*
+         LA    R6,MSGC@SZE(,R6)        next data line
+         USING MSGD,R6
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             line address
+         USING DXT,R4
+         MVC   DXTLINE,DXIT            init header line
+         LA    R5,1(,R5)               increment lines
+*
+**       Display dynamic exits header
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             line address
+         MVC   DXTLINE,DXST            init header line
+         LA    R5,1(,R5)               increment lines
+*
+**       Display dynamic exits data
+*
+         ICM   R8,15,ZEVTMSTE          MSTE init?
+         BNZ   XXIT010                 yes
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             line address
+         MVC   DXTLINE,DXNX            no
+         LA    R5,1(,R5)               increment lines
+         B     XXIT090                 display end line
+*
+XXIT010  DS    0H
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             line address
+         MVC   DXTLINE,ZEVTBLKS        clear data line
+         MVC   DXTMODN,MSTEMODN        exit module name
+         MVC   DXTEXIT,MSTEXITN        dynamic exit name
+         LA    R5,1(,R5)               increment lines
+*
+         ZTRCE CMD=A,LINKAGE=LOCAL     trace
+         MVC   DXTSTAT,=CL8'ACTIVE'    STATE=ACTIVE
+         CLI   MSTESTAT,MSTR@ACT       active state?
+         BE    XXIT020                 yes
+         MVC   DXTSTAT,=CL8'INACTIVE'  no
+         ZTRCE CMD=B,LINKAGE=LOCAL     trace
+*
+XXIT020  DS    0H
+         L     R7,=V(ZDYNTBLE)         DYNX table address
+         XC    DSAWORD,DSAWORD         zero queue address
+         ICM   R3,15,ZEVTDYNE          entry count init?
+         BZ    XXIT050                 no, skip queue
+         ZTRCE CMD=C,LINKAGE=LOCAL     trace
+*
+XXIT030  DS    0H
+         CLC   DYNDYNAM,MSTEXITN       exit name match?
+         BE    XXIT040                 yes
+         CLC   DYNEXTNM,MSTENAME       exit name match?
+         BE    XXIT040                 yes
+         LA    R7,DYN@SIZE(,R7)        next entry
+         BCT   R3,XXIT030              loop
+         MVC   DXTQUE,ZEVTBLKS         show blanks
+         ZTRCE CMD=D,LINKAGE=LOCAL     trace
+         B     XXIT060                 carry on
+*
+XXIT040  DS    0H
+         L     R3,DYNCOMMQ             common queue offset
+         L     R3,0(R3,R11)            common queue address
+         ST    R3,DSAWORD              save queue address
+         ZTRCE CMD=E,LINKAGE=LOCAL     trace
+*
+XXIT050  DS    0H
+         ZMACS GEN=CNVX,DSAVAR,DSAWORD
+         MVC   DXTQUE(8),DSAVAR        show queue address
+*
+XXIT060  DS    0H
+         LA    R8,MSTE@SZE(,R8)        next MSTE entry
+         CLC   MSTETEND,=AL4(-1)       last entry?
+         BE    XXIT090                 yes
+         CLC   MSTETEND,=CL4'FREE'     free entry?
+         BE    XXIT060                 yes, skip it
+         ZTRCE CMD=F,LINKAGE=LOCAL     trace
+         B     XXIT010                 no, loop
+*
+**       Initialize END message line
+*
+XXIT090  DS    0H
+         LA    R6,MSGD@SZE(,R6)        end line address
+         USING MSGE,R6
+         L     R1,=A(MSXE)             END line model
+         MVC   MSGE(MSGE@SZE),0(R1)    init end line model
+         LA    R5,1(,R5)               increment lines
+*
+**       Set number of lines to display
+*
+         L     R6,DSAWBUFF             control line address
+         USING MSGC,R6                 addressability
+         ST    R5,DSAWLINE             set number of lines
+         STC   R5,MSGCTOTL             init display lines
+*
+**       Display MLWTO message lines
+*
+         XR    R0,R0                   console ID
+         WTO   MF=(E,(R6))             issue MLWTO
+         ST    R1,DSAWID               save returned ID
+         ST    R15,DSARC               save RC
+         LTR   R15,R15                 successful?
+         BZ    XXIT099                 yes
+*
+**       MLWTO message display failed
+*
+         ZWTO  MID=ZEMF14E,                                            +
+               V1=DSARC,               show RC                         +
+               V2=DSAWID               show returned ID
+*
+**       Storage release MLWTO buffer
+*
+XXIT099  DS    0H
+         ICM   R1,15,DSAWBUFF          storage release required?
+         BZ    XXITXIT                 no
+         L     R0,DSAWSIZE             buffer size
+         XC    DSAWBUFF,DSAWBUFF       zero buffer address
+         L     R2,DSAEKEY              caller key
+         STORAGE RELEASE,ADDR=(R1),KEY=(R2),                           +
+               LENGTH=(R0),SP=&SP230,LINKAGE=SYSTEM
+*
+XXITXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+DXITAB   DS    0C
+DXIT     DC    CL70' Subsystem Server Dynamic Exits Facility exits'
+DXST     DC    CL70'  EMFXIT    EXIT             STATE    QUEUE'
+DXNX     DC    CL70' No Dynamic Exits Facility exits added'
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        TRACE                                               */
+*/*                                                                  */
+*/* Function:    TRACE display command routine                       */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  Message lines                                   */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+TRACE    ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Storage obtain MLWTO buffer
+*
+         L     R2,DSAEKEY              caller key
+         L     R3,=AL4(255*80)         max MLWTO lines
+         ST    R3,DSAWSIZE             save table size
+         STORAGE OBTAIN,LOC=ANY,COND=YES,                              +
+               LENGTH=(R3),SP=&SP230,KEY=(R2),LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BZ    TRCE000                 yes
+         ST    R15,DSARC               save RC
+         ZWTO  MID=ZEMF20E,V1==CL3'230',V2=DSARC
+         B     TRCEXIT                 exit
+*
+**       Init control message line
+*
+TRCE000  DS    0H
+         ST    R1,DSAWBUFF             save buffer address
+         LR    R6,R1                   buffer address
+         USING MSGC,R6
+         XR    R5,R5                   zero lines
+         L     R1,=A(MSXC)             control line model
+         MVC   MSGC(MSGC@SZE),0(R1)    init control line model
+         MVC   MSGCTSUB,ZEVTSUBN       init subsystem name
+         MVC   MSGCTCMD,DSACMDTA       init command data
+         LA    R5,1(,R5)               increment lines
+*
+**       Display subsystem trace data
+*
+         LA    R6,MSGC@SZE(,R6)        next data line
+         USING MSGD,R6
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R4,MSGDDATA             line address
+         USING TRC,R4
+         MVC   TRCLINE,TRCE            init status line
+         LA    R5,1(,R5)               increment lines
+*
+**       Display INI= trace data
+*
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         USING TRC,R4
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'INI='      init trace ID
+         MVC   TRCDATA,ZTRCINTR        init trace data
+         MVC   TRCPGMN,ZTRCINX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display CMD= trace data
+*
+         CLC   ZTRCCMTR,ZEVTDOTS       any data?
+         BE    TRCE010                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'CMD='      init trace ID
+         MVC   TRCDATA,ZTRCCMTR        init trace data
+         MVC   TRCPGMN,ZTRCCMX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display EOM= trace data
+*
+TRCE010  DS    0H
+         CLC   ZTRCEMTR,ZEVTDOTS       any data?
+         BE    TRCE020                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'EOM='      init trace ID
+         MVC   TRCDATA,ZTRCEMTR        init trace data
+         MVC   TRCPGMN,ZTRCEMX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display CSM= trace data
+*
+TRCE020  DS    0H
+         CLC   ZTRCCSTR,ZEVTDOTS       any data?
+         BE    TRCE030                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'CSM='      init trace ID
+         MVC   TRCDATA,ZTRCCSTR        init trace data
+         MVC   TRCPGMN,ZTRCCSX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display DYN= trace data
+*
+TRCE030  DS    0H
+         CLC   ZTRCDYTR,ZEVTDOTS       any data?
+         BE    TRCE040                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'DYN='      init trace ID
+         MVC   TRCDATA,ZTRCDYTR        init trace data
+         MVC   TRCPGMN,ZTRCDYX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display XIT= trace data
+*
+TRCE040  DS    0H
+         CLC   ZTRCXIIR,ZEVTDOTS       any data?
+         BE    TRCE050                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'XIT='      init trace ID
+         MVC   TRCDATA,ZTRCXIIR        init trace data
+         MVC   TRCPGMN,ZTRCXIX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display JMR= trace data
+*
+TRCE050  DS    0H
+         CLC   ZTRCJMTR,ZEVTDOTS       any data?
+         BE    TRCE060                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'JMR='      init trace ID
+         MVC   TRCDATA,ZTRCJMTR        init trace data
+         MVC   TRCPGMN,ZTRCJMX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display PAR= trace data
+*
+TRCE060  DS    0H
+         CLC   ZTRCPATR,ZEVTDOTS       any data?
+         BE    TRCE070                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'PAR='      init trace ID
+         MVC   TRCDATA,ZTRCPATR        init trace data
+         MVC   TRCPGMN,ZTRCPAX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display LOC= trace data
+*
+TRCE070  DS    0H
+         CLC   ZTRCLOTR,ZEVTDOTS       any data?
+         BE    TRCE080                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'LOC='      init trace ID
+         MVC   TRCDATA,ZTRCLOTR        init trace data
+         MVC   TRCPGMN,ZTRCLOX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display AST= trace data
+*
+TRCE080  DS    0H
+         CLC   ZTRCASYR,ZEVTDOTS       any data?
+         BE    TRCE090                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'AST='      init trace ID
+         MVC   TRCDATA,ZTRCASYR        init trace data
+         MVC   TRCPGMN,ZTRCASX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display JBP= trace data
+*
+TRCE090  DS    0H
+         CLC   ZTRCJBTR,ZEVTDOTS       any data?
+         BE    TRCE100                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'JPB='      init trace ID
+         MVC   TRCDATA,ZTRCJBTR        init trace data
+         MVC   TRCPGMN,ZTRCJBX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display UTL= trace data
+*
+TRCE100  DS    0H
+         CLC   ZTRCUTIR,ZEVTDOTS       any data?
+         BE    TRCE110                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'UTL='      init trace ID
+         MVC   TRCDATA,ZTRCUTIR        init trace data
+         MVC   TRCPGMN,ZTRCUTX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display USO= trace data
+*
+TRCE110  DS    0H
+         CLC   ZTRCUSIR,ZEVTDOTS       any data?
+         BE    TRCE120                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'USO='      init trace ID
+         MVC   TRCDATA,ZTRCUSIR        init trace data
+         MVC   TRCPGMN,ZTRCUSX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display UJP= trace data
+*
+TRCE120  DS    0H
+         CLC   ZTRCUJIR,ZEVTDOTS       any data?
+         BE    TRCE130                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'UJP='      init trace ID
+         MVC   TRCDATA,ZTRCUJIR        init trace data
+         MVC   TRCPGMN,ZTRCUJX2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display U29= trace data
+*
+TRCE130  DS    0H
+         CLC   ZTRCU9IR,ZEVTDOTS       any data?
+         BE    TRCE140                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'U29='      init trace ID
+         MVC   TRCDATA,ZTRCU9IR        init trace data
+         MVC   TRCPGMN,ZTRCU9X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display 29L= trace data
+*
+TRCE140  DS    0H
+         CLC   ZTRC29IR,ZEVTDOTS       any data?
+         BE    TRCE150                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'29L='      init trace ID
+         MVC   TRCDATA,ZTRC29IR        init trace data
+         MVC   TRCPGMN,ZTRC29X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display P83= trace data
+*
+TRCE150  DS    0H
+         CLC   ZTRCP3IR,ZEVTDOTS       any data?
+         BE    TRCE160                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'P83='      init trace ID
+         MVC   TRCDATA,ZTRCP3IR        init trace data
+         MVC   TRCPGMN,ZTRCP3X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display P84= trace data
+*
+TRCE160  DS    0H
+         CLC   ZTRCP4IR,ZEVTDOTS       any data?
+         BE    TRCE170                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'P84='      init trace ID
+         MVC   TRCDATA,ZTRCP4IR        init trace data
+         MVC   TRCPGMN,ZTRCP4X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display P85= trace data
+*
+TRCE170  DS    0H
+         CLC   ZTRCP5IR,ZEVTDOTS       any data?
+         BE    TRCE180                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'P85='      init trace ID
+         MVC   TRCDATA,ZTRCP5IR        init trace data
+         MVC   TRCPGMN,ZTRCP5X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display P86= trace data
+*
+TRCE180  DS    0H
+         CLC   ZTRCP6IR,ZEVTDOTS       any data?
+         BE    TRCE190                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'P86='      init trace ID
+         MVC   TRCDATA,ZTRCP6IR        init trace data
+         MVC   TRCPGMN,ZTRCP6X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display U83= trace data
+*
+TRCE190  DS    0H
+         CLC   ZTRCU83A,ZEVTDOTS       any data?
+         BE    TRCE200                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'U83='      init trace ID
+         MVC   TRCDATA,ZTRCU83A        init trace data
+         MVC   TRCPGMN,ZTRC83X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display U84= trace data
+*
+TRCE200  DS    0H
+         CLC   ZTRCU84A,ZEVTDOTS       any data?
+         BE    TRCE210                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'U84='      init trace ID
+         MVC   TRCDATA,ZTRCU84A        init trace data
+         MVC   TRCPGMN,ZTRC84X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display U85= trace data
+*
+TRCE210  DS    0H
+         CLC   ZTRCU85A,ZEVTDOTS       any data?
+         BE    TRCE220                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'U85='      init trace ID
+         MVC   TRCDATA,ZTRCU85A        init trace data
+         MVC   TRCPGMN,ZTRC85X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Display U86= trace data
+*
+TRCE220  DS    0H
+         CLC   ZTRCU86A,ZEVTDOTS       any data?
+         BE    TRCE230                 no
+         LA    R6,MSGD@SZE(,R6)        next data line
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R4,MSGDDATA             next data line
+         MVC   TRCLINE,ZEVTBLKS        clear line
+         MVC   TRCNAME,=CL4'U86='      init trace ID
+         MVC   TRCDATA,ZTRCU86A        init trace data
+         MVC   TRCPGMN,ZTRC86X2        routine name
+         LA    R5,1(,R5)               increment lines
+*
+**       Initialize END message line
+*
+TRCE230  DS    0H
+         LA    R6,MSGD@SZE(,R6)        end line address
+         USING MSGE,R6
+         L     R1,=A(MSXE)             END line model
+         MVC   MSGE(MSGE@SZE),0(R1)    init end line model
+         LA    R5,1(,R5)               increment lines
+*
+**       Set number of lines to display
+*
+         L     R6,DSAWBUFF             control line address
+         USING MSGC,R6
+         ST    R5,DSAWLINE             set number of lines
+         STC   R5,MSGCTOTL             init display lines
+*
+**       Display MLWTO message lines
+*
+         XR    R0,R0                   console ID
+         WTO   MF=(E,(R6))             issue MLWTO
+         ST    R1,DSAWID               save returned ID
+         ST    R15,DSARC               save RC
+         LTR   R15,R15                 successful?
+         BZ    TRCE999                 yes
+*
+**       MLWTO message display failed
+*
+         ZWTO  MID=ZEMF14E,                                            +
+               V1=DSARC,               show RC                         +
+               V2=DSAWID               show returned ID
+*
+**       Storage release MLWTO buffer
+*
+TRCE999  DS    0H
+         ICM   R1,15,DSAWBUFF          storage release required?
+         BZ    TRCEXIT                 no
+         L     R0,DSAWSIZE             buffer size
+         XC    DSAWBUFF,DSAWBUFF       zero buffer address
+         L     R2,DSAEKEY              caller key
+         STORAGE RELEASE,ADDR=(R1),KEY=(R2),                           +
+               LENGTH=(R0),SP=&SP230,LINKAGE=SYSTEM
+*
+TRCEXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0C
+TRCE     DC    CL70' Subsystem Server Trace Data Crumbs'
+TRCE@SZE EQU   *-TRCE
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        TRCLR                                               */
+*/*                                                                  */
+*/* Function:    TRACE=CLEAR command routine                         */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+TRCLR    ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+         MVC   ZTRCINTR,ZEVTDOTS       clear INI= trace data
+         MVC   ZTRCCSTR,ZEVTDOTS       clear CSM= trace data
+         MVC   ZTRCCMTR,ZEVTDOTS       clear CMD= trace data
+         MVC   ZTRCEMTR,ZEVTDOTS       clear EOM= trace data
+         MVC   ZTRCDYTR,ZEVTDOTS       clear DYN= trace data
+         MVC   ZTRCXIIR,ZEVTDOTS       clear XIT= trace data
+*
+         MVC   ZTRCJMTR,ZEVTDOTS       clear JMR= trace data
+         MVC   ZTRCPATR,ZEVTDOTS       clear PAR= trace data
+         MVC   ZTRCLOTR,ZEVTDOTS       clear LOC= trace data
+         MVC   ZTRCASYR,ZEVTDOTS       clear AST= trace data
+         MVC   ZTRCJBTR,ZEVTDOTS       clear JBP= trace data
+*
+         MVC   ZTRCUTIR,ZEVTDOTS       clear UTL= trace data
+         MVC   ZTRCUSIR,ZEVTDOTS       clear USO= trace data
+         MVC   ZTRCUJIR,ZEVTDOTS       clear UJP= trace data
+         MVC   ZTRCU9IR,ZEVTDOTS       clear U29= trace data
+         MVC   ZTRC29IR,ZEVTDOTS       clear 29L= trace data
+*
+         MVC   ZTRCP3IR,ZEVTDOTS       clear P83= trace data
+         MVC   ZTRCP4IR,ZEVTDOTS       clear P84= trace data
+         MVC   ZTRCP5IR,ZEVTDOTS       clear P85= trace data
+         MVC   ZTRCP6IR,ZEVTDOTS       clear P86= trace data
+*
+         MVC   ZTRCU83A,ZEVTDOTS       clear U83= trace data
+         MVC   ZTRCU84A,ZEVTDOTS       clear U84= trace data
+         MVC   ZTRCU85A,ZEVTDOTS       clear U85= trace data
+         MVC   ZTRCU86A,ZEVTDOTS       clear U86= trace data
+*
+         ZWTO  MID=ZEMF16I             trace data cleared
+*
+TRCLXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        HELP                                                */
+*/*                                                                  */
+*/* Function:    HELP display command routine                        */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA address                                     */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*              R0  Reason code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+HELP     ZMACS GEN=SUBENTY             entry
+         USING ZRWA,R9
+         USING ZEVT,R11
+         USING DSA,R12
+*
+**       Storage obtain MLWTO buffer
+*
+         L     R2,DSAEKEY              caller key
+         L     R3,=AL4(255*80)         max MLWTO lines
+         ST    R3,DSAWSIZE             save table size
+         STORAGE OBTAIN,LOC=ANY,COND=YES,                              +
+               LENGTH=(R3),SP=&SP230,KEY=(R2),LINKAGE=SYSTEM
+         LTR   R15,R15                 successful?
+         BZ    HELP000                 yes
+         ST    R15,DSARC               save RC
+         ZWTO  MID=ZEMF20E,V1==CL3'230',V2=DSARC
+         B     HELPXIT                 exit
+*
+**       Init control message line
+*
+HELP000  DS    0H
+         ST    R1,DSAWBUFF             save buffer address
+         LR    R6,R1                   buffer address
+         USING MSGC,R6                 addressability
+         XR    R5,R5                   zero lines
+         L     R1,=A(MSXC)             control line model
+         MVC   MSGC(MSGC@SZE),0(R1)    init control line model
+         MVC   MSGCTSUB,ZEVTSUBN       init subsystem name
+         MVC   MSGCTCMD,DSACMDTA       init command data
+         LA    R5,1(,R5)               increment lines
+*
+**       Display commands help data
+*
+         LA    R6,MSGC@SZE(,R6)        next data line
+         USING MSGD,R6                 addressability
+         L     R1,=A(MSXD)             data line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init data line model
+         LA    R2,HTBC                 number of lines
+         LA    R3,HTAB                 help table address
+         LA    R4,MSGDDATA             line address
+*
+HELP010  DS    0H
+         LA    R5,1(,R5)               increment lines
+         MVC   MSGDDATA,0(R3)          init DATA line
+         LA    R6,MSGD@SZE(,R6)        next DATA line
+         L     R1,=A(MSXD)             DATA line model
+         MVC   MSGD(MSGD@SZE),0(R1)    init DATA line model
+         LA    R3,HTBZ(,R3)            next data line
+         BCT   R2,HELP010              loop
+*
+**       Initialize END message line
+*
+         USING MSGE,R6                 addressability
+         L     R1,=A(MSXE)             END line model
+         MVC   MSGE(MSGE@SZE),0(R1)    init end line model
+         LA    R5,1(,R5)               increment lines
+*
+**       Set number of lines to display
+*
+         L     R6,DSAWBUFF             control line address
+         USING MSGC,R6                 addressability
+         ST    R5,DSAWLINE             set number of lines
+         STC   R5,MSGCTOTL             init display lines
+*
+**       Display MLWTO message lines
+*
+         XR    R0,R0                   console ID
+         WTO   MF=(E,(R6))             issue MLWTO
+         ST    R1,DSAWID               save returned ID
+         ST    R15,DSARC               save RC
+         LTR   R15,R15                 successful?
+         BZ    HELP099                 yes
+*
+**       MLWTO message display failed
+*
+         ZWTO  MID=ZEMF14E,                                            +
+               V1=DSARC,               show RC                         +
+               V2=DSAWID               show returned ID
+*
+**       Storage release MLWTO buffer
+*
+HELP099  DS    0H
+         ICM   R1,15,DSAWBUFF          storage release required?
+         BZ    HELPXIT                 no
+         L     R0,DSAWSIZE             buffer size
+         XC    DSAWBUFF,DSAWBUFF       zero buffer address
+         L     R2,DSAEKEY              caller key
+         STORAGE RELEASE,ADDR=(R1),KEY=(R2),                           +
+               LENGTH=(R0),SP=&SP230,LINKAGE=SYSTEM
+*
+HELPXIT  DS    0H
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*    Command help table                                               *
+*--------+---------+---------+---------+---------+---------+---------+*
+     DS 0C
+HTAB DC CL70'Subsystem Server Display Commands'
+     DC CL70' OPTIONS  - display subsystem server options'
+     DC CL70' STATUS   - display subsystem server status'
+     DC CL70' EXITS    - display subsystem server dynamic exits'
+     DC CL70' TRACE    - display subsystem server trace data'
+     DC CL70'Subsystem Server Action Commands'
+     DC CL70' SHUTDOWN      - shutdown subsystem server'
+     DC CL70' RCV=(NO|YES)  - toggle subsystem server recovery'
+     DC CL70' DBG=(ON|OFF)  - toggle subsystem server debugging'
+     DC CL70' TRC=(ON|OFF)  - toggle subsystem server tracing'
+     DC CL70' TRACE=CLEAR   - clear subsystem server trace data'
+     DC CL70' EXIT=name,STATE=ACTIVE    - activate dynamic exit'
+HTBN DC CL70' EXIT=name,STATE=INACTIVE  - deactivate dynamic exit'
+HTBZ EQU *-HTBN
+HTBC EQU (*-HTAB)/HTBZ
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        Dynamic Storage Area                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+DSA      DSECT ,
+DSASAVE  DS    18F                     mainline savearea
+DSASBSA  DS    18F                     subroutine savearea
+         DS    0X
+DSAFLG1  DS    XL1                     flags
+DSA@STAE EQU   X'80'                   ESTAEX active indicator
+DSA@XACT EQU   X'40'                   active exits indicator
+DSA@CHNG EQU   X'20'                   exit state changed indicator
+DSA@RS13 EQU   X'10'                   -available
+DSA@RS14 EQU   X'08'                   -available
+DSA@RS15 EQU   X'04'                   -available
+DSA@RS16 EQU   X'02'                   -available
+DSA@RS17 EQU   X'01'                   -available
+         DS    0X
+DSAFLGX  DS    XL1                     -available
+DSAXASID DS    AL2                     XASID
+         DS    0F
+DSAOPAR  DS    0F                      output parms
+DSARC    DS    F                       -R15 = RC
+DSARSN   DS    F                       -R0  = RSN
+DSAGR1   DS    F                       -R1  = output parm
+DSA@OPAL EQU   *-DSAOPAR               keep it in order
+         DS    0F
+DSAEKEY  DS    F                       caller key
+DSAXRC   DS    F                       SAF RC
+DSARACF  DS    F                       UACC attribute
+DSATOKN  DS    F                       ESTAEX token
+DSAXASCB DS    F                       XASCB
+DSASCID  DS    F                       SSCMSCID
+DSACNID  DS    F                       SSCMCNID
+DSACMDA  DS    F                       table entry address
+DSAWID   DS    F                       MLWTO ID
+DSAWBUFF DS    F                       MLWTO buffer address
+DSAWSIZE DS    F                       MLWTO buffer size
+DSAWLINE DS    F                       MLWTO display lines
+DSAWORD  DS    F                       a word
+         DS    0F
+DSAXSAWA DS    CL(XSA@SIZE)            XSA block
+         DS    0F
+DSATMAP  DS    CL(TMODL@SZ)            time and date listform
+         DS    0F
+DSAROUTE DS    CL(RACI@SZE)            RACROUTE listform
+         DS    0F
+DSAENTBF DS    0CL255                  profile buffer
+DSAENTBL DS    AL2                     -buffer length
+DSAENTEL DS    AL2                     -profile length
+DSAENTTY DS    CL251                   -profile name
+DSA@ENTL EQU   *-DSAENTTY              -profile name length
+DSA@ENTZ EQU   *-DSAENTBF              profile buffer lenght
+         DS    0C
+DSACLASS DS    0CL9                    CLASS field
+DSACZSZE DS    AL1                     -size
+DSACZEMF DS    CL8                     -name
+DSA@CLSZ EQU   *-DSACLASS              CLASS field size
+         DS    0D
+DSAZRWA  DS    CL(ZRWA@SZE)            ZRWA recovery workarea
+DSAZRWAL EQU   *-DSAZRWA               ZRWA workarea size
+         DS    0F
+DSACMDBF DS    0CL120                  command buffer
+DSACMDID DS    CL4                     command prefix
+DSACMDBL DS    CL1                     blank
+DSACMDTA DS    CL115                   command operands
+DSA@CMDZ EQU   *-DSACMDBF              command buffer length
+         DS    0C
+DSACART  DS    CL8                     SSCMCART
+DSACONS  DS    CL8                     SSCMSCNM
+DSAEXIT  DS    CL8                     dynamic exit name
+DSASTATE DS    CL8                     dynamic exit state
+         DS    0C
+DSAVAR   DS    CL8                     variable data
+DSAVARX  DS    CL1                     slack byte
+DSA@VARZ EQU   *-DSAVAR                keep it together
+         DS    0D
+DSADWRD  DS    D                       conversion workarea
+DSA@DWDZ EQU   *-DSADWRD               workarea size
+         DS    0D
+DSAPLST  DS    XL256                   parmlist
+         DS    0D
+DSAXWORK DS    CL512                   general workarea
+         DS    0D
+DSA@SIZE EQU   *-DSA                   size of DSA
+*
+**       D/DISPLAY STATUS data map
+*
+STS      DSECT ,
+STSLINE  DS    0CL70
+STSNAME  DS    CL36                    -data ID
+STSTOKN  DS    0CL16                   -token name
+STSDATA  DS    0CL34                   -data value
+STSDAV1  DS    CL8                     -data value
+STSFIL1  DS    CL1                     -separator
+STSDAV2  DS    CL8                     -data value
+STSDAV3  DS    CL17                    -data value
+STS@SIZE EQU   *-STS
+*
+**       D/DISPLAY OPTIONS data map
+*
+OPT      DSECT ,
+OPTLINE  DS    0CL70
+OPTNAME  DS    CL9                     -data ID
+OPTDATA  DS    CL61                    -data value
+OPT@SIZE EQU   *-OPT
+*
+**       D/DISPLAY EXITS data map
+*
+DXT      DSECT ,
+DXTLINE  DS    0CL70
+         DS    CL2                     -blanks
+DXTMODN  DS    CL8                     -ZEMF exit
+         DS    CL2                     -blanks
+DXTEXIT  DS    CL16                    -exit name
+         DS    CL1                     -blank
+DXTSTAT  DS    CL8                     -status
+         DS    CL1                     -blank
+DXTQUE   DS    CL8                     -queue address
+         DS    CL24                    -blanks
+DXT@SIZE EQU   *-DXT
+*
+**       D/DISPLAY TRACE data map
+*
+TRC      DSECT ,
+TRCLINE  DS    0CL70
+         DS    CL2                     -blanks
+TRCNAME  DS    CL4                     -data ID
+TRCTRCD  DS    0CL64                   -data value
+TRCDATA  DS    CL39                    -data value
+         DS    CL1                     -blank
+TRCPGMN  DS    CL8                     -routine name
+         DS    CL16                    -blanks
+TRC@SIZE EQU   *-TRC
+*
+**       STCKCONV time and date map
+*
+TMAP     DSECT
+TIMLINE  DS    0CL70
+         DS    CL36                    title
+TIMESTR  DS    0CL34
+TIMEHH   DS    CL2                     hours
+         DS    CL1                     :
+TIMEMM   DS    CL2                     minutes
+         DS    CL1                     :
+TIMESS   DS    CL2                     seconds
+         DS    CL1                     :
+TIMETH   DS    CL2                     hundreds
+         DS    CL1
+DATEMM   DS    CL2                     month
+         DS    CL1                     /
+DATEDD   DS    CL2                     day
+         DS    CL1                     /
+DATEYY   DS    CL4                     year
+         DS    CL12                    filler
+TIME@DTE EQU   *-TMAP
+*---------------------------------------------------------------------*
+*        Data areas                                                   *
+*--------+---------+---------+---------+---------+---------+---------+*
+         ZTABS GEN=CMD,DSECT=YES
+         ZMACS GEN=MID,ID=XID,DSECT=YES
+         ZTABS GEN=WTO,DSECT=YES,T=MSG
+         ZTABS GEN=DYN,DSECT=YES
+         IEFJSSOB (CM),CONTIG=NO
+         DCBD  DSORG=PS,DEVD=DA
+         ZEVT  DSECT=YES,LIST=YES
+         END   ,

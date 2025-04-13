@@ -1,0 +1,59 @@
+*/*
+*/*********************************************************************
+*/*                                                                   *
+*/* INSTLIB MEMBERS:                                                  *
+*/*  $$README - YOU MUST READ THIS!!!                                 *
+*/*  $DOC     - zEMF server documentation                             *
+*/*  $DOC2    - zEMF server implementation                            *
+*/*  $ALLOC   - Dataset allocation JCL procedure                      *
+*/*  $LINK    - Assemble and link zEMF server JCL procedure           *
+*/*  $INSTALL - zEMF installation procedure                           *
+*/*  $SHUTDWN - zEMF shutdown procedure                               *
+*/*  $RACF    - zEMF security implementation JCL procedure            *
+*/*  $OPTIONS - zEMF initialization options                           *
+*/*  $COMMAND - zEMF display and action commands                      *
+*/*                                                                   *
+*/* PARMLIB MEMBERS:                                                  *
+*/*  IEFACTRT -                                                       *
+*/*  IEFUJI   - Job initiation exit                                   *
+*/*  IEFUJV   - Job validation exit                                   *
+*/*  IEFUSI   - Step initiation exit                                  *
+*/*  IEFUSO   - SYSOUT limit exit                                     *
+*/*  IEFUTL   - Time limit exit                                       *
+*/*  IEFUSO   - SYSOUT limit exit                                     *
+*/*  IEFUJP   - Job purge exit                                        *
+*/*  IEFU29   - SMF dump exit                                         *
+*/*  IEFU29L  - SMF log stream dump exit                              *
+*/*  IEFU83   - SMF record exit                                       *
+*/*  IEFU84   - SMF record exit                                       *
+*/*  IEFU85   - SMF record exit                                       *
+*/*  IEFU86   - SMF record exit                                       *
+*/*                                                                   *
+*/* ASSEMBLER SOURCE MEMBERS:                                         *
+*/*  $MVC     - Authorized MVC macro                                  *
+*/*  $NI      - Authorized NI macro                                   *
+*/*  $OI      - Authorized OI macro                                   *
+*/*  $ST      - Authorized ST macro                                   *
+*/*  $XC      - Authorized XC macro                                   *
+*/*  EMFCMD   - SSI commands listener module                          *
+*/*  EMFCSM   - Common subsystem server services module               *
+*/*  EMFEOM   - SSI End-of-Memory listener module                     *
+*/*  EMFFRR   - Functional Recovery Routine module                    *
+*/*  EMFINI   - Subsystem Server SSI initialization module            *
+*/*  EMFMSG   - Subsystem Server general WTO module                   *
+*/*  EMFPAR   - Subsystem Server parser module                        *
+*/*  EMFRTM   - Recovery Termination Manager module                   *
+*/*  EMFSRV   - Subsystem Server vecto table module                   *
+*/*  EMFTST   - Subsystem server testing module                       *
+*/*  EMFXIT   - SMF exits processor module                            *
+*/*  ZCALL    - Call macro                                            *
+*/*  ZEVT     - Control table                                         *
+*/*  ZGBLS    - Globals                                               *
+*/*  ZMACS    - Mapping macros                                        *
+*/*  ZRETRY   - Recovery retry macro                                  *
+*/*  ZTABS    - Subsystem Server tables                               *
+*/*  ZTRCE    - Subsystem Server trace macro                          *
+*/*  ZWTO     - Subsystem Server WTO macro                            *
+*/*                                                                   *
+*/*********************************************************************
+*/*

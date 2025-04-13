@@ -1,0 +1,16 @@
+*
+***********************************************************************
+*                                                                     *
+* IEFUSI   - Step initiation exit                                     *
+*                                                                     *
+* SMFLIMXX - Consider using the MVS SMFLIMxx PARMLIB member,          *
+*            which provides the ability to set the REGION and         *
+*            reserve storage for system key storage obtains without   *
+*            coding this exit.                                        *
+*                                                                     *
+* SUPPORT  - Available with V2R1 - September, 2025                    *
+*                                                                     *
+***********************************************************************
+*
+JOB(*)
+*

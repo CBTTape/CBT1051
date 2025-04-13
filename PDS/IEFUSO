@@ -1,0 +1,101 @@
+***********************************************************************
+*                                                                     *
+* IEFUSO - SYSOUT limit exit                                          *
+*  Receives control from the job entry subsystem when the number of   *
+*  data lines written to a SYSOUT data set exceeds the output limit.  * *
+*                                                                     *
+* You can use IEFUSO to:                                              *
+*  - Allow job step to ABEND when output limit has been exceeded      *
+*  - Extend output limit at the data set level for selected jobs      *
+*  - Write SMF records                                                *
+*  - Issue commands                                                   *
+*  - Issue warning WTO messages                                       *
+*                                                                     *
+* Supported Subsystems:                                               *
+*  - STC                                                              *
+*  - JOB (JES2, JES3)                                                 *
+*                                                                     *
+***********************************************************************
+*
+JOB(BENTSTJS,             TESTING EXIT
+    SYSOUT=5000,5,         ****testing................
+    WARNWTO=YES)           ****testing................
+*
+*
+*
+*
+JOB(PROD*,                PRODUCTION JOBS
+    SYSOUT=10000,3,        10,000 additional data lines; 3 extensions
+    WARNWTO=YES)           issue output data lines exceeded message
+*
+JOB(TEST*,                TEST JOBS
+    SYSOUT=5000,5,         5,000 additional data lines; 5 extensions
+    WARNWTO=YES)           issue output data lines exceeded message
+*
+STC(*,                    ALL STARTED TASKS
+    SYSOUT=NOLIMIT,        allow unlimited data lines
+    WARNWTO=YES)           issue output data lines exceeded message
+*
+***********************************************************************
+*                                                                     *
+* CODING CONVENTIONS:                                                 *
+*                                                                     *
+*  Syntax:                                                            *
+*   Separate parameters with commas.                                  *
+*   Enclose list of parameters within parenthesis.                    *
+*                                                                     *
+*  Parameters:                                                        *
+*   ({JOB|STC},                                                       *
+*    SYSOUT={nnnnnnnn|nnn|NOLIMIT},                                   *
+*    SMF={NO|nnnn},                                                   *
+*    WARNWTO={NO|YES},                                                *
+*    COMMAND={'command-text'})                                        *
+*                                                                     *
+*  Description:                                                       *
+*   SYSOUT={nnnnnnnn|nnn|NOLIMIT}                                     *
+*    Specifies the number of additional SYSOUT data lines the job     *
+*    is allowed to write. If not specified the default is SYSOUT=0.   *
+*                                                                     *
+*   Examples:                                                         *
+*    SYSOUT=0       -job is allowed to terminate.                     *
+*    SYSOUT=10000   -job is allowed to write 10,000 additional SYSOUT *
+*                    data lines.                                      *
+*    SYSOUT=5000,7  -job is allowed to write 7 iterations of 5000     *
+*                    additional SYSOUT data lines.                    *
+*    SYSOUT=NOLIMIT -job is allowed to write unlimited SYSOUT data    *  *
+*                    lines.                                           *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* SMF={NO|nnnn}                                                       *
+*  Specifies the SMF recording option. If not specified the default   *
+*  is SMF=NO. SMF=nnn allowes the subsystem server to write SMF       *
+*  data lines for each granted extension to record type specified.    *
+*                                                                     *
+*  Examples:                                                          *
+*   SMF=NO    -subsystem server does not write SMF record             *
+*   SMF=255   -subsystem server writes SMF record 255                 *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* WARNWTO={NO|YES}                                                    *
+*  Specifies the WTO message option. If not specified the default     *
+*  is WARNWTO=NO. WARNWTO=YES allows the subsystem server to issue    *
+*  a warning WTO message for each granted extension.                  *
+*                                                                     *
+*  Examples:                                                          *
+*   WARNWTO=NO   -subsystem server does not issue warning WTO message *
+*   WARNWTO=YES  -subsystem server issues warning WTO message         *
+*                                                                     *
+*  Message Examples:                                                  *
+*   ZEMF82W JOB jobname - SYSOUT limit extension granted; 5,000 lines *
+*   ZEMF83W JOB jobname - Granted SYSOUT extensions exceeded 100,000  *
+*                         lines                                       *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* COMMAND='command-text'                                              *
+*  Specifies a system or subsystem command to be issued.              *
+*  The length of the command can not exceed 60 characters.            *
+*                                                                     *
+***********************************************************************
+*

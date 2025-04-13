@@ -1,0 +1,110 @@
+***********************************************************************
+*                                                                     *
+* IEFU29 - SMF dump Exit                                              *
+*  Receives control when the current recording data set cannot hold   *
+*  any more records. It's also invoked when the SMF writer switched   *
+*  recording data sets as a result of the SWITCH SMF command.         *
+*  The exit will also be invoked during SMF initialization for data   *
+*  sets that are not empty.                                           *
+*                                                                     *
+* You can use IEFU29 to:                                              *
+*  - Initiate the dump program by submitting a job request            *
+*  - Indicate whether the SMF dump message (IEE362A, IEE362I,         *
+*    IEE391A or IEE392I) is to be issued.                             *
+*  - Issue commands                                                   *
+*  - issue warning WTO messages                                       *
+*                                                                     *
+* Supported Subsystems:                                               *
+*  - STC                                                              *
+*                                                                     *
+***********************************************************************
+*
+STC(SMF,                                SMF SUBSYSTEM
+    DUMPCMD='START DUMPXY,DSN=&DSNAME',  dump full SMF dataset
+    WARNWTO=YES)                         notify operator dump started
+*
+*
+*
+*
+***********************************************************************
+*                                                                     *
+* CODING CONVENTIONS:                                                 *
+*                                                                     *
+*  Syntax:                                                            *
+*   Separate parameters with commas.                                  *
+*   Enclose list of parameters within parenthesis.                    *
+*                                                                     *
+*  Parameters:                                                        *
+*   (STC,                                                             *
+*    DUMPCMD='command-text',                                          *
+*    WARNWTO={NO|YES},                                                *
+*    COMMAND={'command-text'})                                        *
+*                                                                     *
+*  Description:                                                       *
+*   STC(SMF,                                                          *
+*    Specifies the SMF started task name.                             *
+*                                                                     *
+*   DUMPCMD='command-text'                                            *
+*    Specifies the procedure that is submitted to start the SMF       *
+*    dataset dump process.                                            *
+*                                                                     *
+*   DUMPMSG={NO|YES}                                                  *
+*    When 'NO' is specified SMF does not issue the dump message.      *
+*    When 'YES' is specified, SMF issues one of the following dump    *
+*    dump messages:                                                   *
+*                                                                     *
+*    IEE362A SMF ENTER DUMP FOR SYS1.MANn                             *
+*     SYS1.MANn is ready to be dumped; this message is issued in      *
+*     response to either HALT EOD or a SWITCH SMF command, or if      *
+*     an alternate dataset is not available at SMF initialization     *
+*     time.                                                           *
+*                                                                     *
+*    IEE362I SMF ENTER DUMP FOR SYS1.MANn                             *
+*     The SYS1.MANn dataset is full, or a HALT EOD or A SWITCH SMF    *
+*     command was issued.                                             *
+*                                                                     *
+*    IEE391A SMF ENTER DUMP FOR DATA SET DSN=dsname                   *
+*     This message is issued when an intallation defines a dataset    *
+*     name that does not use the SYS1.MANn naming convention.         *
+*                                                                     *
+*    IEE392I SMF ENTER DUMP FOR DATA SET ON VOLSER=volume,DSN=dsname  *
+*     This message is issued when an intallation defines a dataset    *
+*     name that does not use the SYS1.MANn naming convention.         *
+*                                                                     *
+*   Example:                                                          *
+*    STC(SMF,                                                         *
+*        DUMPCMD='START DUMPXY,DSN=&DSNAME')                          *
+*                                                                     *
+*   Variables:                                                        *
+*    &DSNAME  - contains the name of the full SMF dataset that        *
+*               requires dumping.                                     *
+*                                                                     *
+*   Example:                                                          *
+*    STC(SMF,                                                         *
+*        DUMPMSG=YES')   -SMF issues the dump message.                *
+*                                                                     *
+*   Note: DUMPCMD= and DUMPMSG= are mutually exclusive parameters.    *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* WARNWTO={NO|YES}                                                    *
+*  Specifies the WTO message option. If not specified the default     *
+*  is WARNWTO=NO. WARNWTO=YES allows the subsystem server to issue    *
+*  a warning WTO message indicating the SMF option selected.          *
+*                                                                     *
+*  Examples:                                                          *
+*   WARNWTO=NO   -subsystem server does not issue warning WTO message *
+*   WARNWTO=YES  -subsystem server issues warning WTO message         *
+*                                                                     *
+*  Message Examples:                                                  *
+*   ZEMF85W JOB jobname - SMF dataset dump command issued             *
+*   ZEMF85W JOB jobname - SMF dataset dump message issued             *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* COMMAND='command-data'                                              *
+*  Specifies a system or subsystem command to be issued.              *
+*  The length of the command can not exceed 60 characters.            *
+*                                                                     *
+***********************************************************************
+*

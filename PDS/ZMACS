@@ -1,0 +1,208 @@
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name:        ZMACS                                              */
+.*/*                                                                 */
+.*/* Function:    Subsystem server service macro                     */
+.*/*                                                                 */
+.*/* Description: Generates the following macros:                    */
+.*/*                                                                 */
+.*/*               1. MID     - Module ID                            */
+.*/*               2. CNVX    - Hexadecimal data conversion          */
+.*/*               3. CNVD    - Decimal data conversion              */
+.*/*               4. SRVENTY - Service routine entry macro          */
+.*/*               5. SRVEXIT - Service routine exit macro           */
+.*/*               6. SUBENTY - Subroutine entry macro               */
+.*/*               7. SUBEXIT - Subroutine exit macro                */
+.*/*                                                                 */
+.*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)              */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @00 | V1R1 | 09242023 | Ben Marino  | Initial version              *
+.*     |      |          |             |                              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+         MACRO
+&ZID     ZMACS &TARGET,&SOURCE,                                        +
+               &SUBSAVE=DSASBSA,&OUTPAR=DSAOPAR,                       +
+               &SAVE=YES,&RESTORE=YES,&ARPAR=NO,&DSA=DSA,              +
+               &GEN=,&TR=ZEVTZCNV,                                     +
+               &WRKREG=15,&DWORD=DSADWRD,&ID=MID,                      +
+               &TID=,&XID=,&SWKEY=YES,                                 +
+               &DSECT=NO
+.*
+         AIF   ('&GEN' EQ 'MID').GENMID
+         AIF   ('&GEN' EQ 'CNVX').GENCNVX
+         AIF   ('&GEN' EQ 'CNVD').GENCNVD
+         AIF   ('&GEN' EQ 'SRVENTY').GENSRVE
+         AIF   ('&GEN' EQ 'SRVEXIT').GENSRVX
+         AIF   ('&GEN' EQ 'SUBENTY').GENSUBE
+         AIF   ('&GEN' EQ 'SUBEXIT').GENSUBX
+         AIF   ('&GEN' EQ 'OI').GENOR
+         AIF   ('&GEN' EQ 'NI').GENAND
+         AIF   ('&GEN' EQ 'ST').GENSTOR
+         MNOTE 8,'*** ZMACS Invalid GEN= operand specified'
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: SRVENTY                                                   */
+.*/*                                                                 */
+.*/* Function: Service routine entry macro                           */
+.*/*                                                                 */
+.*/* Notes: None                                                     */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENSRVE ANOP  ,
+         LCLC  &NTY
+&NTY     SETC  'NTY'.'&SYSNDX'
+&ZID     DS    0H
+         ENTRY &ZID
+         STM   R14,R12,GPR@R14(R13)   .save caller regs
+         BASR  R10,0                  .entry
+         USING *,R10                  .base
+         B     &NTY                   .branch
+         DC    CL8'&ZID'              .ID subroutine
+.*
+&NTY     DS    0H                     .
+         AIF   ('&SAVE' EQ 'NO').NOSAVE
+         AIF   ('&ARPAR' EQ 'NO').GRPAR
+         EAR   R12,AR1                .XSA
+         AGO   .RSAVE
+.*
+.GRPAR   ANOP  ,
+         LR    R12,R1                 .XSA
+.*
+.RSAVE   ANOP  ,
+         USING XSA,R12
+         LA    R3,XSASAVE             .savearea
+         ST    R13,GPR@BWD(,R3)
+         ST    R3,GPR@FWD(,R13)
+         LR    R13,R3
+         STM   R15,R1,XSAIPAR         .save input GPRs
+         STAM  AR15,AR1,XSAIARS       .save input ARs
+.*
+.NOSAVE  ANOP  ,
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: SRVEXIT                                                   */
+.*/*                                                                 */
+.*/* Function: Service routine exit macro                            */
+.*/*                                                                 */
+.*/* Notes: None                                                     */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENSRVX ANOP  ,
+         AIF   ('&RESTORE' EQ 'NO').NOREST
+         LM    R15,R1,XSAOPAR         .output GPRs
+         LAM   AR15,AR1,XSAOARS       .output ARs
+         L     R13,GPR@BWD(,R13)      .caller savearea
+         LM    R2,R12,GPR@R2(R13)     .restore regs
+         L     R14,GPR@R14(,R13)      .return address
+         BR    R14                    .exit
+         MEXIT ,
+.*
+.NOREST  ANOP  ,
+         LM    R0,R12,GPR@R0(R13)     .restore regs
+         L     R14,GPR@R14(,R13)      .return address
+         BR    R14                    .exit
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: SUBENTY                                                   */
+.*/*                                                                 */
+.*/* Function: Service routine entry macro                           */
+.*/*                                                                 */
+.*/* Notes: None                                                     */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENSUBE ANOP  ,
+         LCLC  &SUB
+&SUB     SETC  'SUB'.'&SYSNDX'
+&ZID     DS    0H
+         STM   R14,R12,GPR@R14(R13)   .save caller regs
+         LR    R10,R15                .entry
+         USING &ZID,R10               .base
+         B     &SUB                   .branch
+         DC    CL8'&ZID'              .ID
+.*
+&SUB     DS    0H                     .
+         USING &DSA,R12               .
+         LA    R3,&SUBSAVE            .savearea
+         ST    R13,GPR@BWD(,R3)
+         ST    R3,GPR@FWD(,R13)
+         LR    R13,R3
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: SUBEXIT                                                   */
+.*/*                                                                 */
+.*/* Function: Service routine exit macro                            */
+.*/*                                                                 */
+.*/* Notes: None                                                     */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENSUBX ANOP  ,
+         LM    R15,R1,&OUTPAR         .output GPRs
+         L     R13,GPR@BWD(,R13)      .caller savearea
+         LM    R2,R12,GPR@R2(R13)     .restore regs
+         L     R14,GPR@R14(,R13)      .return address
+         BR    R14                    .exit
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: MID                                                       */
+.*/*                                                                 */
+.*/* Function: Module entry constants                                */
+.*/*                                                                 */
+.*/* Notes: None                                                     */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENMID  ANOP  ,
+         COPY  ZGBLS
+         AIF   ('&DSECT' EQ 'NO').MID00
+&ID      DSECT ,
+         DC    AL4(0)                 .STM instruction
+         DC    AL4(0)                 .BRANCH instruction
+.*
+.MID00   ANOP  ,
+&ID.NAME DC    CL8'&SYSECT'           .module name
+&ID.SUB  DC    CL4'&SUB'              .subsystem server name
+&ID.REL  DC    CL8'&REL'              .release level
+&ID.DATE DC    CL8'&SYSDATE'          .assembly date
+&ID.TIME DC    CL8'&SYSTIME'          .assembly time
+&ID.CPYR DC    CL40'&CPYRGHT'
+         SYSSTATE OSREL=ZOSV1R6
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: CNVX                                                      */
+.*/*                                                                 */
+.*/* Function: Convert data to hexadecimal macro                     */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENCNVX ANOP  ,
+         UNPK  &TARGET.(L'&TARGET-1),&SOURCE
+         MVC   &TARGET+L'&TARGET-1(1),&SOURCE+L'&SOURCE-1
+         NI    &TARGET,X'0F'
+         MVZ   &TARGET+1(L'&TARGET-1),&TARGET
+         TR    &TARGET,&TR
+         MEXIT ,
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: CNVD                                                      */
+.*/*                                                                 */
+.*/* Function: Convert data to decimal macro                         */
+.*/*                                                                 */
+.*/*******************************************************************/
+.GENCNVD ANOP  ,
+         L     &WRKREG,&SOURCE         .get data value
+         CVD   &WRKREG,&DWORD          .convert to decimal
+         OI    &DWORD+7,X'0F'          .fix sign
+         UNPK  &TARGET,&DWORD          .unpck it
+         MEXIT ,
+         MEND  ,

@@ -1,0 +1,35 @@
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: $NI                                                       */
+.*/*                                                                 */
+.*/* Description: Authorized AND immediate macro                     */
+.*/*                                                                 */
+.*/* Notes: High order 3 bytes &KEY fullword must be zero.           */
+.*/*                                                                 */
+.*/* © Copyright Ben Marino. 2021 - 2024 (unpublished)               */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @00 | V1R1 | 09242023 | Ben Marino  | Initial version              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+         MACRO
+&ZID     $NI   &TARGET,&SOURCE,&KEY=DSAEKEY,&WRKREG=15
+.*
+         LCLC  &XNI
+&XNI     SETC  'XNI'.'&SYSNDX'
+.*
+         ICM   &WRKREG,B'0001',&KEY+3  .key zero?
+         BZ    &XNI                    .yes
+         SPKA  0(0)                    .supervisor key
+&XNI     DS    0H
+         NI    &TARGET,&SOURCE         .update target
+         ICM   &WRKREG,B'0001',&KEY+3  .key zero?
+         BZ    &XNI.A
+         SPKA  0(&WRKREG)              .restore my key
+&XNI.A   DS    0H
+         MEND  ,

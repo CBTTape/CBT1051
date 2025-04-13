@@ -1,0 +1,177 @@
+***********************************************************************
+*                                                                     *
+* ZEMFMSTR                                                            *
+*  ZEMF subsystem server initialization member                        *
+*                                                                     *
+*  The following exits are supported in this release:                 *
+*   IEFUTL   - Time limit                                             *
+*   IEFUSO   - SYSOUT limit exit                                      *
+*   IEFUJP   - Job purge exit                                         *
+*   IEFU29   - SMF dump exit                                          *
+*   IEFU29L  - SMF log stream dump exit                               *
+*   IEFU83   - SMF record exit                                        *
+*   IEFU84   - SMF record exit                                        *
+*   IEFU85   - SMF record exit                                        *
+*   IEFU86   - SMF record exit                                        *
+*                                                                     *
+*  The following exits will be supported by V2R1:                     *
+*   IEFUJV   - SMF job validation exit                                *
+*   IEFUJI   - SMF job initiation exit                                *
+*   IEFUSI   - SMF step initiation exit                               *
+*   IEFACTRT - SMF job and step termination exit                      *
+*                                                                     *
+***********************************************************************
+*
+ADDEXIT(IEFUTL,                 Time Limit Exit
+        POS=FIRST,               call first among others
+        STATE=ACTIVE,            add it as active
+        SYS=NO,                  donot call it system-wide
+        SUBSYS='STC,TSO')        call it for STC & TSO subsystems
+*
+ADDEXIT(IEFUSO,                 SYSOUT Limit Exit
+        POS=FIRST,               call first among others
+        STATE=ACTIVE,            add it as active
+        SYS=NO,                  donot call it system-wide
+        SUBSYS='STC')            call it for STC subsystem
+*
+ADDEXIT(IEFUJP,                 Job Purge Exit
+        POS=FIRST,               call first among others
+        STATE=ACTIVE,            add it as active
+        SYS=NO,                  donot call it system-wide
+        SUBSYS='STC')            call it for STC subsystem
+*
+ADDEXIT(IEFU29,                 SMF Dump Exit
+        POS=FIRST,               call first among others
+        STATE=ACTIVE,            add it as active
+        SYS=YES,                 call it system-wide
+        SUBSYS='STC')            call it for STC subsystem
+*
+ADDEXIT(IEFU29L,                SMF LOGR Dump Exit
+        POS=FIRST,               call first among others
+        STATE=ACTIVE,            add it as active
+        SYS=YES,                 call it system-wide
+        SUBSYS='STC')            call it for STC subsystem
+*
+ADDEXIT(IEFU83,                 SMF Record Exit
+        POS=FIRST,               call first among others
+        STATE=ACTIVE,            add it as active
+        SYS=YES,                 call it system-wide
+        SUBSYS='STC')            call it for STC subsystem
+*
+ADDEXIT(IEFU84,                 SMF Record Exit
+        POS=FIRST,               call before other exits
+        STATE=ACTIVE,            add it as active
+        SYS=YES,                 call it system-wide
+        SUBSYS='STC')            call it for STC subsystem
+*
+ADDEXIT(IEFU85,                 SMF Record Exit
+        POS=FIRST,               call first among others
+        STATE=ACTIVE,            add it as active
+        SYS=YES,                 call it system-wide
+        SUBSYS='STC')            call it for STC subsystem
+*
+ADDEXIT(IEFU86,                 SMF Record Exit
+        POS=FIRST,               call first among others
+        STATE=ACTIVE,            add it as active
+        SYS=YES,                 call it system-wide
+        SUBSYS='STC')            call it for STC subsystem
+*
+***********************************************************************
+*                                                                     *
+* CODING CONVENTIONS:                                                 *
+*                                                                     *
+* Syntax:                                                             *
+*  Separate parameters with commas.                                   *
+*  Enclose list of parameters within parenthesis.                     *
+*                                                                     *
+* Parameters:                                                         *
+*  ADDEXIT(exitname,                                                  *
+*          STATE={ACTIVE|INACTIVE},                                   *
+*          POS={FIRST|LAST|SYSTEM},                                   *
+*          SYS={NO|YES},                                              *
+*          SUBSYS={'STC|JES2|JES3|TSO|ASCH|OMVS'})                    *
+*                                                                     *
+* Description:                                                        *
+*  ADDEXIT(exitname                                                   *
+*   Specifies the SMF exit member name.                               *
+*   The name must match a supported SMF exit name.                    *
+*                                                                     *
+*  STATE=ACTIVE                                                       *
+*  STATE=INACTIVE                                                     *
+*   Specifies the initial exit state.                                 *
+*   An active exit allows ZEMF to receive control from the Dynamic    *
+*   Exits Facility when the SMF exit is invoked.                      *
+*   An inactive exit is not invoked by the Dynamic Exits Facility.    *
+*   If not specified, the default is STATE=INACTIVE.                  *
+*                                                                     *
+*   You can change the exit state dynamically by invoking the ZEMF    *
+*   subsystem server EXIT command.                                    *
+*                                                                     *
+* Examples:                                                           *
+*   ZEMF EXIT=IEFU29,STATE=ACTIVE                                     *
+*   ZEMF EXIT=IEFU29,STATE=INACTIVE                                   *
+*                                                                     *
+*  POS=SYSTEM                                                         *
+*  POS=FIRST                                                          *
+*  POS=LAST                                                           *
+*   Specifies the order in which the system calls the ZEMF exit       *
+*   associated with the SMF exit.                                     *
+*   If not specified, the default is POS=FIRST.                       *
+*                                                                     *
+*   POS=SYSTEM specifies that the exit is called in any order.        *
+*                                                                     *
+*   POS=FIRST specifies that the exit is called before other exits    *
+*   are called.                                                       *
+*                                                                     *
+*   POS=LAST specifies that the exit is called after other exits      *
+*   have been called.                                                 *
+*                                                                     *
+*  SYS=NO                                                             *
+*  SYS=YES                                                            *
+*   Specifies the exit system scope.                                  *
+*   When SYS=NO is specified, the exit is not invoked system-wide.    *
+*   When SYS=YES is specified, the system invokes the exit for work   *
+*   running under the SMF-defined subsystems, such as JES2, JES3,     *
+*   STC, TSO, ASCH or OMVS.                                           *
+*                                                                     *
+*  SUBSYS={STC|TSO|JES2|JES3|ASCH|OMVS}                               *
+*   Specifies the exit subsystem scope.                               *
+*   When SUBSYS is specified, the system invokes the exit only for    *
+*   work running under the specified subsystems, such as JES2, JES3,  *
+*   STC, TSO, ASCH or OMVS. If SUBSYS in not specified, SYS=YES must  *
+*   be specified.                                                     *
+*                                                                     *
+* Examples:                                                           *
+*   ADDEXIT(IEFUTL,                 Time Limit Exit                   *
+*           POS=FIRST,               call before other exits          *
+*           STATE=ACTIVE,            add it as active                 *
+*           SYS=NO,                  donot call it system-wide        *
+*           SUBSYS='STC')            call it for STC subsystem        *
+*                                                                     *
+*   ADDEXIT(IEFU84,                 SYSOUT Limit Exit                 *
+*           POS=FIRST,               call before other exits          *
+*           STATE=ACTIVE,            add it as active                 *
+*           SYS=YES')                call it system-wide              *
+*                                                                     *
+*   ADDEXIT(IEFU84,                 SYSOUT Limit Exit                 *
+*           POS=FIRST,               call before other exits          *
+*           STATE=ACTIVE,            add it as active                 *
+*           SYS=NO,                  donot call it system-wide        *
+*           SUBSYS='STC,TSO')        call it for STC & TSO subsystems *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* IMPLEMENTATION DETAILS:                                             *
+*                                                                     *
+* PROGxx                                                              *
+*  To define SMF exits to the dynamic Exits Facility, you must        *
+*  specify the exits in both PROGxx and SMFPRMxx PARMLIB members.     *
+*  The system does not call the exits if they are defined in PROGxx   *
+*  only.                                                              *
+*                                                                     *
+*  If you do not specify the SMF exit in the ADDEXIT keyword, the     *
+*  system defaults to using the MVS supplied exit routine or your     *
+*  installation supplied exit routine.                                *
+*                                                                     *
+***********************************************************************
+*

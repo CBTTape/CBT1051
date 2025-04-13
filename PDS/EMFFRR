@@ -1,0 +1,189 @@
+EMFFRR   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        EMFFRR                                              */
+*/*                                                                  */
+*/* Function:    FRR Recovery Termination Manager                    */
+*/*                                                                  */
+*/* Description: Performs recovery on behalf of SRB-mode and         */
+*/*              locked ZEMF service routines.                       */
+*/*                                                                  */
+*/* Input Regs:  R1  SDWA address                                    */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  FRR address                                     */
+*/*              R8  SDWA address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*                                                                  */
+*/* Output Regs: R14 Return address                                  */
+*/*                                                                  */
+*/* Attributes:  SRB-mode                                            */
+*/*              locked TCB-mode                                     */
+*/*              Primary mode                                        */
+*/*              Reentrant                                           */
+*/*              Key 0                                               */
+*/*              Supervisor state                                    */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @00 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+EMFFRR   AMODE 31
+EMFFRR   RMODE ANY
+         USING EMFFRR,R15              entry
+         B     FRR0000                 branch
+         ZMACS GEN=MID,DSECT=NO        module ID
+         DROP  R15
+*
+FRR0000  DS    0H
+         LR    R10,R15                 base
+         USING EMFFRR,R10
+         LR    R8,R1                   SDWA address
+         USING SDWA,R8
+         L     R7,SDWAPARM             FRR parm area
+         USING FRR,R7
+         L     R9,FRRZRWA              SRWA address
+         USING ZRWA,R9
+         CLC   ZRWAID,=CL4'ZRWA'       ZRWA?
+         BNE   FRRP099                 no, percolate
+*
+**       Retry recursion check
+*
+         TM    SDWAERRD,SDWACLUP       clean up only?
+         BNZ   FRRPERC                 yes, percolate
+         TM    SDWAERRC,SDWAPERC       percolated ABEND?
+         BNZ   FRRPERC                 yes, percolate
+         TM    FRRFLG1,FRR@RECR        recursive entry?
+         BNZ   FRRPERC                 yes, percolate
+         OI    FRRFLG1,FRR@RECR        set recursion indicator
+         ICM   R3,15,ZRWARTRY          retry address init?
+         BZ    FRRPERC                 no, percolate
+*
+**       Capture diagnostic data
+*
+         MVC   ZRWASUBN,MIDSUB         copy server name
+         MVC   ZRWAAPSW,SDWAEC2        copy ABEND PSW
+         XC    ZRWASFLG,ZRWASFLG       zap flags
+         MVC   ZRWASABN,SDWACMPC       copy ABEND code
+         L     R3,ZRWABEND             ABEND code
+         SRL   R3,12                   shift it
+         LTR   R3,R3                   user ABEND code?
+         BZ    FRR0010                 yes
+         ST    R3,ZRWABEND             set system ABEND code
+         OI    ZRWAWORK,ZRWA@SYS       no
+*
+FRR0010  DS    0H
+         MVC   ZRWATEA,SDWATRN2        translation address
+         MVC   ZRWARECR,MIDNAME        recovery routine name
+         TM    ZRWAWORK,ZRWA@SYS       system ABEND code?
+         BZ    FRR0020                 no
+         ZMACS GEN=CNVX,ZRWACONA,ZRWABEND,TR=TRTABLE
+         B     FRR0030
+*
+FRR0020  DS    0H
+         ZMACS GEN=CNVD,DWORD=ZRWADWRD,ZRWACONA,ZRWABEND
+*
+FRR0030  DS    0H
+         ZMACS GEN=CNVX,ZRWACONR,ZRWARSN,TR=TRTABLE
+*
+**       Init SVC dump parmlist
+*
+         TM    ZRWAFLG1,ZRWA@DMP       DUMP=NO
+         BZ    FRRRECR                 yes, skip dump
+         MVC   ZRWAPLST(SDUMPXL),SDUMPX
+         MVC   ZRWATTLE(DMPHDRTL),DMPHDR
+         MVC   ZRWADSUB,ZRWASUBN       show subsystem name
+         MVC   ZRWADMOD,ZRWALMOD       show module name
+         MVC   ZRWADRTN,ZRWASECT       show routine name
+         TM    ZRWAWORK,ZRWA@SYS       system ABEND code?
+         BZ    FRR0040                 no
+         MVI   ZRWADTYP,C'S'           system type
+         MVC   ZRWADCOD(3),ZRWACONA+5  ABEND code
+         MVI   ZRWADCOD+3,BLANK        trailing blank
+         MVC   ZRWADRSN,ZRWACONR       reason code
+         B     FRR0050
+*
+FRR0040  DS    0H
+         MVI   ZRWADTYP,C'U'           user type
+         MVC   ZRWADCOD,ZRWACONA+4     user ABEND code
+         MVC   ZRWADRSN,ZRWACONR       reason code
+*
+**       Branch enter SDUMPX service
+*
+FRR0050  DS    0H
+         LA    R13,ZRWAFRRS            SDUMPX savearea
+         SDUMPX BRANCH=YES,                                            +
+               HDRAD=ZRWATTLE,MF=(E,ZRWAPLST)
+         ST    R15,ZRWASDRC            save SDUMPX RC
+*
+**       Recovery retry routine
+*
+FRRRECR  DS    0H
+         L     R3,ZRWARTRY             set retry address
+         MVC   SDWASRSV,ZRWAGPRS       set retry regs
+         OI    FRRFLG1,FRR@RTRY        set retry indicator
+         SETRP RC=4,                                                   +
+               RETADDR=(R3),           retry address                   +
+               RETREGS=YES,            restore registers               +
+               REMREC=YES,             remove FRR                      +
+               RECPARM=ZRWARECP,       recovery data                   +
+               WKAREA=(R8)             SDWA address
+         OI    ZRWAFRR,ZRWA@DEL        FRR deleted by REMREC=YES
+         BR    R14                     return to RTM
+*
+**       ABEND percolation routine
+*
+FRRPERC  DS    0H
+         TM    ZRWAFLG1,ZRWA@DMP       DUMP=NO?
+         BZ    FRRP000                 yes, skip SETRP
+         SETRP DUMP=YES,WKAREA=(R8)
+*
+FRRP000  DS    0H
+         TM    ZRWAFLG1,ZRWA@LOG       LOGREC=NO?
+         BZ    FRRP099                 yes, SKIP SETRP
+         SETRP RECORD=YES,WKAREA=(R8)
+*
+FRRP099  DS    0H
+         SETRP RC=0,WKAREA=(R8)        percolate
+         BR    R14                     return to RTM
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+TRTABLE  DC    CL16'0123456789ABCDEF'  translate table
+*---------------------------------------------------------------------*
+*        SDUMPX listform                                              *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+SDUMPX   SDUMPX SDATA=(SQA,CSA,NUC,LSQA,RGN,LPA,TRT),MF=L
+SDUMPXL  EQU   *-SDUMPX
+SDUMPMAX DS    0XL(256-SDUMPXL+1)
+         DS    0F
+DMPHDR   DC    AL1(DMPHDRLN)           dump title length
+DMPTITLE DC    C'ZEMF SERVER ERROR; nnnnnnn/nnnnnnn ?0000/00000000'
+DMPHDRLN EQU   *-DMPTITLE
+DMPHDRTL EQU   *-DMPHDR
+DMPHLMAX DS    0XL(100-DMPHDRLN+1)
+*---------------------------------------------------------------------*
+*        Literals                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        Subsystem Server Data Areas                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+         ZEVT  DSECT=YES,LIST=YES
+         END   ,

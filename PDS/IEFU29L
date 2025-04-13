@@ -1,0 +1,86 @@
+***********************************************************************
+*                                                                     *
+* IEFU29L - SMF Log Stream dump exit                                  *
+*  Allows you to initiate the archiving of SMF data from the log      *
+*  stream. The exit is invoked using the SWITCH SMF command.          *
+*                                                                     *
+* You can use IEFU29L to:                                             *
+*  - Initiate the dump program by submitting a job request            *
+*  - Issue commands                                                   *
+*  - Issue warning WTO messages                                       *
+*                                                                     *
+* Supported Subsystems:                                               *
+*  - STC                                                              *
+*                                                                     *
+***********************************************************************
+*
+STC(SMF,                                  SMF SUBSYSTEM
+    DUMPCMD='START LOGRDMP,DSN=&DSNAME',   dump full LOGR datasets      s
+    WARNWTO=YES)                           issue dump is starting msg
+*
+*
+***********************************************************************
+*                                                                     *
+* CODING CONVENTIONS:                                                 *
+*                                                                     *
+*  Syntax:                                                            *
+*   Separate parameters with commas.                                  *
+*   Enclose list of parameters within parenthesis.                    *
+*                                                                     *
+*  Parameters:                                                        *
+*   (STC,                                                             *
+*    DUMPCMD='command-text',                                          *
+*    WARNWTO={NO|YES},                                                *
+*    COMMAND={'command-text'})                                        *
+*                                                                     *
+*  Description:                                                       *
+*   STC(SMF,                                                          *
+*    Specifies the SMF subsystem name.                                *
+*                                                                     *
+*   DUMPCMD='command data'                                            *
+*    Specifies the procedure that is submitted to start the full      *
+*    log stream dataset dump process.                                 *
+*                                                                     *
+*   Examples:                                                         *
+*    STC(SMF,                                                         *
+*        DUMPCMD='START LOGRDMP,DSN=&DSNAME')                         * *
+*                                                                     *
+*   Variables:                                                        *
+*    &DSNAME  - contains the name of the full log stream name that    *
+*               requires dumping.                                     *
+*                                                                     *
+* Note: The exit runs in the SMF address space that runs under the    *
+*       MSTR susystem rather than JES2 or JES3. Therefore jobs        *
+*       submitted to the internal reader from this exit will run      *
+*       under the MSTR subsystem.                                     *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* WARNWTO={NO|YES}                                                    *
+*  Specifies the WTO message option. If not specified the default     *
+*  is WARNWTO=NO. WARNWTO=YES allows the subsystem server to issue    *
+*  a warning WTO message indicating the SMF option selected.          *
+*                                                                     *
+*  Examples:                                                          *
+*   WARNWTO=NO   -subsystem server does not issue warning WTO message *
+*   WARNWTO=YES  -subsystem server issues warning WTO message         *
+*                                                                     *
+*  Message Examples:                                                  *
+*   ZEMF85W JOB jobname - SMF dataset dump command issued             *
+*   ZEMF85W JOB jobname - SMF dataset dump message issued             *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* COMMAND='command-data'                                              *
+*  Specifies a system or subsystem command to be issued.              *
+*  The length of the command can not exceed 60 characters.            *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* Note: You can use the system logger to manage how long you retain   *
+*       the SMF log stream data and to automatically offload the log  *
+*       stream data to VSAM linear DASD data sets, so you might not   *
+*       need to use this exit to drive the archiving process.         *
+*                                                                     *
+***********************************************************************
+*

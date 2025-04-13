@@ -1,0 +1,92 @@
+ Re: zEMF - Dynamic SMF Exits Alteration Facility
+Subject:  Re: zEMF - Dynamic SMF Exits Alteration Facility
+From:     Ben Marino <b2marino@outlook.com>
+Date:     2/8/2024, 6:53 AM
+To:       Sam Golob <sbgolob@cbttape.org>
+
+The following is a description of why Systems
+Programmers need zEMF.
+
+zEMF does not change the settings of the SMFPRMxx
+PARMLIB member. SMF already has this support to alter
+those parameters thru the SETSMF system command, which
+acts by changing which SMFPRMxx PARMLIB member is now
+active.
+
+But we want to adjust the SMF settings without
+doing either of the following:
+
+1.  Changing the SMFPRMxx PARMLIB member in any
+    way.
+
+2.  Changing our coded SMF exits in any way.
+
+The reason for zEMF is to allow you to extend the
+functionality of the SMF exits distributed with z/OS
+without changing a single line of code.  zEMF makes SMF
+modifications dynamically thru sets of parameters
+specifically designed for each exit.
+
+You just have to learn how to use the parameters built
+into ZEMF, to change the attributes and control which
+each SMF exit accomplishes.
+
+ZEMF also allows you to adjust each SMF exit to operate
+differently on different classes of JOBs, TSUs, or STCs.
+That is something which is not simple to accomplish by
+conventional means.  ZEMF dynamically adds granularity to
+each SMF exit's range of control.
+
+SOME MORE INFORMATION ABOUT ZEMF:
+
+zEMF Dynamic SMF Exits Alteration Facility
+
+The MVS operating system's SMF component is equipped with various
+default SMF exits that activate when resource limits are
+exceeded, necessitating intervention.  These exits oversee maximum
+CPU and SYSOUT limits, determine which SMF records are to be
+written or omitted from the active SMF dataset, manage dumping
+when the dataset reaches capacity, and handle the switch between
+SMF recording datasets.
+
+One such default exit, the IEFUTL SMF exit, functions as follows:
+it is triggered when the JOB, STEP, or JOB WAIT time limit
+expires.  If the JOB's CPU time limit expires, the exit terminates
+the JOB.  If the STEP's CPU time limit expires, it extends the
+limit by a fixed amount.  Similarly, if the continuous WAIT time
+limit expires, it extends the wait time.  However, if more than
+three extensions are needed, the JOB is terminated.  This default
+exit applies uniformly to all workloads running on the system,
+regardless of whether they are JOBs, Started Tasks, or TSO
+sessions.
+
+Customizing the behavior of a SMF exit requires Systems
+Programmers to code the necessary changes, conduct thorough
+testing, and implement the modified exits into the MVS operating
+system, necessitating an IPL to take effect.  Any bugs during SMF
+exit execution can jeopardize the workload's integrity and even
+lead to system crashes.
+
+The zEMF Exits Management Subsystem Server, addresses these
+challenges by allowing System Programmers to implement changes to
+SMF exits without altering the code.  zEMF enables quick
+modification and dynamic implementation of rules into the MVS
+operating system simply by defining external SMF exit rules. This
+eliminates potential risks to production workload activity and
+eliminates the need for MVS operating system IPLs when
+implementing SMF exit changes.
+
+Moreover, zEMF provides the capability for System Programmers to
+classify resource usage by JOBs, Started Tasks, and TSO sessions,
+supporting the usage of generic names for each.  For instance,
+they can designate JOB A to utilize unlimited CPU resources while
+restricting JOB B to limited CPU resources.  Similarly, they can
+allocate limited CPU resources to a specific category of TSO
+users while granting unlimited CPU resources to another category.
+This granular control over resource allocation facilitates
+efficient management of system resources based on specific
+workload requirements.
+
+Best regards,
+-Ben
+

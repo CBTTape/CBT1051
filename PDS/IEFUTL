@@ -1,0 +1,191 @@
+***********************************************************************
+*                                                                     *
+* IEFUTL - Time Limit Exit                                            *
+*  Receives control when one of the following time limits expires:    *
+*                                                                     *
+* You can use IEFUTL to:                                              *
+*  - Job processor time limit                                         *
+*  - Step processor time limit                                        *
+*  - Continuous wait time limit for the job                           *
+*  - Write SMF records                                                *
+*  - Issue commands                                                   *
+*  - Issue warning WTO messages                                       *
+*                                                                     *
+* Supported Subsystems:                                               *
+*  - STC                                                              *
+*  - TSO                                                              *
+*  - JOB (JES2, JES3)                                                 *
+*  - ASCH                                                             *
+*  - OMVS                                                             *
+*                                                                     *
+***********************************************************************
+*
+JOB(PROD*,             PRODUCTION JOBS
+    JOBCPU=10,5,        allow 10 additional seconds; 5 extensions
+    STEPCPU=5,3,        allow 5 additional seconds; 3 extensions
+    WAITTIME=JWT,3,     allow SMFPRMxx JWT wait time; 3 extensions
+    WARNWTO=YES)        issue warning WTO for each granted extension
+*
+JOB(TEST*,             TEST JOBS
+    JOBCPU=0,           donot allow additional CPU
+    STEPCPU=0,          donot allow additional CPU
+    WAITTIME=0,         donot allow additional WAIT time
+    WARNWTO=NO)         donot issue warning WTO message
+*
+TSO(TS*,               TECH SUPPORT TSO USERS
+    WAITTIME=NOLIMIT,   unlimited WAIT time extensions
+    WARNWTO=NO)         donot issue warning message
+*
+STC(*,                 ALL STARTED TASKS
+    JOBCPU=NOLIMIT,     unlimited job CPU extensions
+    STEPCPU=NOLIMIT,    unlimited step CPU extensions
+    WAITTIME=NOLIMIT,   unlimited WAIT time extensions
+    WARNWTO=NO)         donot issue warning WTO message
+*
+OMVS(*,                OMVS SUBSYSTEM WORKLOAD
+    JOBCPU=NOLIMIT,     unlimited job CPU extensions
+    STEPCPU=NOLIMIT,    unlimited step CPU extensions
+    WAITTIME=NOLIMIT,   unlimited WAIT time extensions
+    WARNWTO=NO)         donot issue warning WTO message
+*
+ASCH(*,                ASCH SUBSYSTEM WORKLOAD
+    JOBCPU=NOLIMIT,     unlimited job CPU extensions
+    STEPCPU=NOLIMIT,    unlimited step CPU extensions
+    WAITTIME=NOLIMIT,   unlimited WAIT time extensions
+    WARNWTO=NO)         donot issue warning WTO message
+*
+*
+***********************************************************************
+*                                                                     *
+* CODING CONVENTIONS:                                                 *
+*                                                                     *
+* Syntax:                                                             *
+*  Separate parameters with commas.                                   *
+*  Enclose list of parameters within parenthesis.                     *
+*                                                                     *
+* Parameters:                                                         *
+*  ({JOB|STC|TSO|ASCH|OMVS},                                          *
+*   {JOBCPU=limit},                                                   *
+*   {STEPCPU=limit},                                                  *
+*   {WAITTIME=limit},                                                 *
+*   SMF={NO|nnnn},                                                    *
+*   WARNWTO={NO|YES},                                                 *
+*   COMMAND={'command-text'})                                         *
+*                                                                     *
+* Description:                                                        *
+*  {JOB|STC|TSO|OMVS|ASCH}                                            *
+*   Specifies job type and jobname that requires time limit checks.   *
+*                                                                     *
+*  Examples:                                                          *
+*   JOB(*            -all jobnames                                    *
+*   JOB(MY*X*        -generic jobname                                 *
+*   STC(SMFDAILY     -specific jobname                                *
+*   TSO(TS*          -generic TSO users                               *
+*   TSO(CBT001       -specific TSO user                               *
+*                                                                     *
+*  JOBCPU={nnnn|nnn|NOLIMIT}                                          *
+*   Specifies the number of additional CPU seconds the job is allowed *
+*   to use. If not specified the default is JOBCPU=0.                 *
+*                                                                     *
+*  Examples:                                                          *
+*   JOBCPU=0         -job is allowed to terminate.                    *
+*   JOBCPU=5         -job is allowed to use 5 additional CPU seconds. *
+*   JOBCPU=6,3       -job is allowed to use 3 iterations of 6         *
+*                     additional CPU seconds.                         *
+*   JOBCPU=NOLIMIT   -job is allowed to use unlimited CPU. Each CPU   *
+*                     extension is granted a default of 3 seconds.    *
+*                                                                     *
+*  TUJBCPU={nnnn|nnn|NOLIMIT}                                         *
+*   Specifies the number of additional CPU timer units the job is     *
+*   allowed to use. If not specified the default is TUJBCPU=0.        *
+*                                                                     *
+*   TUJBCPU=0         -job is allowed to terminate.                   *
+*   TUJBCPU=5         -job is allowed to use 5 additional CPU timer   *
+*                      units.                                         *
+*   TUJBCPU=6,3       -job is allowed to use 3 iterations of 6        *
+*                      additional CPU timer units.                    *
+*   TUJBCPU=NOLIMIT   -job is allowed to use unlimited CPU. Each CPU  *
+*                      extension is granted a default of 38400 timer  *
+*                      units (1 second).                              *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+*  STEPCPU={nnnn|nnn|NOLIMIT}                                         *
+*   Specifies the number of additional CPU seconds the step is        *
+*   allowed to use. If not specified the default is STEPCPU=0.        *
+*                                                                     *
+*  Examples:                                                          *
+*   STEPCPU=0        -step is allowed to terminate.                   *
+*   STEPCPU=3        -step is allowed to use 3 additional CPU seconds.*
+*   STEPCPU=5,2      -step is allowed to use 2 iterations of 5        *
+*                     additional CPU seconds.                         *
+*   STEPCPU=NOLIMIT  -step is allowed to use unlimited CPU.           *
+*                                                                     *
+*  TUSTPCPU={nnnn|nnn|NOLIMIT}                                        *
+*   Specifies the number of additional CPU timer units the step is    *
+*   allowed to use. If not specified the default is TUSTPCPU=0.       *
+*                                                                     *
+*   TUSTPCPU=0        -step is allowed to terminate.                  *
+*   TUSTPCPU=5        -step is allowed to use 5 additional CPU timer  *
+*                      units.                                         *
+*   TUSTPCPU=6,3      -step is allowed to use 3 iterations of 6       *
+*                      additional CPU timer units.                    *
+*   TUSTPCPU=NOLIMIT  -step is allowed to use unlimited CPU.          *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+*  WAITTIME={nnnn|nnn|JWT|NOLIMIT}                                    *
+*   Specifies the job wait time limit. If not specified, the default  *
+*   is WAITTIME=0.                                                    *
+*                                                                     *
+*  Examples:                                                          *
+*   WAITTIME=0        -job is allowed to terminate.                   *
+*   WAITTIME=900      -Job is allowed 900 additional wait time        *
+*                      seconds (15 minutes).                          *
+*   WAITTIME=JWT,3    -Job is allowed 3 additinal wait extensions as  *
+*                      specified by the SMFPRMxx JWT(hhmm) parameter. *
+*   WAITTIME=NOLIMIT  -Job is allowed to wait indefinitely. Each      *
+*                      wait extension is granted using the job wait   *
+*                      time limit specified by the SMFPRMxx JWT()     *
+*                      parameter.                                     *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* SMF={NO|YES}                                                        *
+*  Specifies the SMF recording option. If not specified the default   *
+*  is SMF=NO. SMF=nnn allowes the subsystem server to write SMF       *
+*  records for each granted extension to specified record type.       *
+*                                                                     *
+*  Examples:                                                          *
+*   SMF=NO     -subsystem server does not write SMF record            *
+*   SMF=nnn    -subsystem server writes SMF record type nnnn          *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* WARNWTO={NO|YES}                                                    *
+*  Specifies the WTO message option. If not specified the default     *
+*  is WARNWTO=NO. WARNWTO=YES allows the subsystem server to issue    *
+*  a warning WTO message for granted and exceeded extensions.         *
+*                                                                     *
+*  Examples:                                                          *
+*   WARNWTO=NO   -subsystem server does not issue warning WTO message *
+*   WARNWTO=YES  -subsystem server issues warning WTO message         *
+*                                                                     *
+*  Message Examples:                                                  *
+*   ZEMF80W jobname - CPU time limit extension granted                *
+*   ZEMF81W jobname - granted CPU time limit extensions exceeded      *
+*                                                                     *
+*   ZEMF80W jobname - Step CPU time limit extension granted           *
+*   ZEMF81W jobname - Granted step CPU time limit extensions exceeded *
+*                                                                     *
+*   ZEMF80W jobname - Wait time limit extension granted               *
+*   ZEMF81W jobname - Granted wait time limit extensions exceeded     *
+*                                                                     *
+* ------------------------------------------------------------------- *
+*                                                                     *
+* COMMAND='command-data'                                              *
+*  Specifies a system or subsystem command to be issued.              *
+*  The length of the command can not exceed 60 characters.            *
+*                                                                     *
+***********************************************************************
+*

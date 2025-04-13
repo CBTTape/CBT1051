@@ -1,0 +1,588 @@
+         MACRO
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name:        ZTABS                                              */
+.*/*                                                                 */
+.*/* Function:    Subsystem server table generation macro            */
+.*/*                                                                 */
+.*/* Description: Generates the following tables:                    */
+.*/*                                                                 */
+.*/*              1. CMD   command listener entry table              */
+.*/*              2. EOM   EOM listener entry table                  */
+.*/*              3. EXT   exit listener entry table                 */
+.*/*              4. KEY   exit keyword parameter table              */
+.*/*              5. VAR   variable names table                      */
+.*/*              6. DYN   Dynamic Exits Facility SYS exit table     */
+.*/*              7. SSI   subsystem vector table                    */
+.*/*              8. MLWTO data lines entry table                    */
+.*/*                                                                 */
+.*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)              */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @00 | V1R1 | 09242023 | Ben Marino  | Initial version              *
+.*     |      |          |             |                              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+&ZID     ZTABS &GEN=,                                                  +
+               &TYPE=,                                                 +
+               &EP=,                                                   +
+               &FC=,                                                   +
+               &KEY=,                                                  +
+               &CODE=,                                                 +
+               &DATA=,                                                 +
+               &PCID=,                                                 +
+               &SAF=,                                                  +
+               &T=MSG,                                                 +
+               &LENGTH=,                                               +
+               &COMMAND=,                                              +
+               &QUEUE=,                                                +
+               &EXIT=,                                                 +
+               &MODE=,                                                 +
+               &LOCKS=,                                                +
+               &JMR=NO,                                                +
+               &SSN=NO,                                                +
+               &SMF=NO,                                                +
+               &LINKAGE=,                                              +
+               &DSECT=NO
+.*
+         COPY  ZGBLS
+.*
+         AIF   ('&GEN' EQ 'CMD').GENCMD
+         AIF   ('&GEN' EQ 'EOM').GENEOM
+         AIF   ('&GEN' EQ 'DYN').GENDYN
+         AIF   ('&GEN' EQ 'KEY').GENKEY
+         AIF   ('&GEN' EQ 'VAR').GENVAR
+         AIF   ('&GEN' EQ 'SSI').GENSSI
+         AIF   ('&GEN' EQ 'SST').GENSST
+         AIF   ('&GEN' EQ 'XIT').GENXIT
+         AIF   ('&GEN' EQ 'WTO').GENWTO
+         MNOTE 8,'*** ZTABS Invalid GEN= operand specified'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate SSVT vector table                                   *
+.*                                                                    *
+.*       Function Codes: 08 EOM                                       *
+.*                       10 MGCR/E                                    *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENSSI  ANOP  ,
+         AIF   ('&DSECT' EQ 'NO').SSINODS
+         AIF   ('&DSECT' NE 'YES').SSI01
+ZSSVT    DSECT
+         AGO   .SSIYESD
+.SSINODS ANOP  ,
+ZSSVT    DS    0F
+.SSIYESD ANOP  ,
+         DC    H'0'          reserved
+         DC    H'2'          function routines
+ZSSVTFC  DC    XL256'0'
+ZSSEN    ORG   ZSSVTFC+7     FC=08 - EOM
+         DC    XL1'01'
+ZSSCM    ORG   ZSSVTFC+9     FC=10 - MGCR/E
+         DC    XL1'02'
+         ORG   ,
+ZSSVTMX  EQU   *-ZSSVT
+ZEMFEOM  DC    V(EMFEOM)     01 - EMFEOM listener EPA
+ZEMFCMD  DC    V(EMFCMD)     02 - EMFCMD listener EPA
+ZEMFRV3  DC    A(0)          03 - reserved
+         ORG   ,
+ZSSVT@SZ EQU   *-ZSSVT       SSVT size
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.SSI01   MNOTE 8,'*** SSI - DSECT operand specification error'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate Multiline WTO data lines                            *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENWTO  ANOP  ,
+         AIF   ('&DSECT' EQ 'NO').NEXTC
+*
+**       MLWTO Control Line
+*
+&T.C     DSECT ,
+         AGO   .NEXTC1
+.NEXTC   ANOP  ,
+&T.C     DS    0F
+.NEXTC1  ANOP  ,
+&T.CTLEN DC    AL2(38)                .control line text length
+&T.CMCSF DC    XL2'0040'              .MCS flags
+&T.CTEXT DS    0CL34                  .control line text
+&T.CTMID DC    CL8'ZEMF00I'           .message ID
+&T.CTSUB DC    CL4'ZEMF'              .subsystem server name
+&T.CTBLK DC    CL1' '                 .blank
+&T.CTCMD DC    CL21' '                .text data
+&T.CLTYP DC    XL2'8000'              .line type
+&T.CBYTE DC    X'00'                  .?
+&T.CTOTL DC    AL1(10)                .default number of data lines
+&T.C@SZE EQU   *-&T.C                 .control line size
+*
+**       MLWTO Data Line
+*
+         AIF   ('&DSECT' EQ 'NO').NEXTD
+&T.D     DSECT ,
+         AGO   .NEXTD1
+.NEXTD   ANOP  ,
+&T.D     EQU   *
+.NEXTD1  ANOP  ,
+&T.DTLEN DC    AL2(74)                .data line length
+&T.DLTYP DC    XL2'2000'              .line type
+&T.DDATA DC    CL70' '                .text data
+&T.D@LEN EQU   *-&T.DDATA             .text length
+&T.D@SZE EQU   *-&T.D                 .data line size
+&T.XSIZE EQU   24576                  .24K (256 data lines)
+&T.XMAXL EQU   24576/&T.D@SZE-2       .max number of data lines
+*
+**       MLWTO End Line
+*
+         AIF   ('&DSECT' EQ 'NO').NEXTE
+&T.E     DSECT ,
+         AGO   .NEXTE1
+.NEXTE   ANOP  ,
+&T.E     EQU   *
+.NEXTE1  ANOP  ,
+&T.ETLEN DC    AL2(74)                .end line length
+&T.ELTYP DC    XL2'3000'              .line type
+&T.ETEXT DC    CL70'END'              .text data
+&T.E@SZE EQU   *-&T.E                 .line length
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate subsystem server command table                      *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENCMD  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').CMDLIST
+         AIF   ('&DSECT' NE 'NO').CMD00
+         AIF   ('&TYPE' EQ 'INITIAL').CMDINIT
+         AIF   ('&TYPE' EQ 'FINAL').CMDFINI
+         AIF   ('&TYPE' EQ 'ENTRY').CMDENTY
+         AGO   .CMD01
+.*
+.**      TYPE=INITIAL
+.*
+.CMDINIT ANOP  ,
+         DS    0F                    .initial table entry
+         MEXIT ,
+.*
+.**      TYPE=ENTRY
+.*
+.CMDENTY ANOP  ,
+         DS    0F
+         AIF   ('&EP' EQ '').CMD01
+         DC    A(&EP)                .EPA
+         AIF   ('&SAF' EQ '').CMDX00
+         AIF   ('&SAF' EQ 'CALL').CMDX80
+         AIF   ('&SAF' NE 'NOCALL').CMD04
+.*
+.CMDX00  ANOP  ,
+         DC    XL1'00'               .SAF=NOCALL
+         AGO   .CMDX99
+.*
+.CMDX80  ANOP  ,
+         DC    XL1'80'               .SAF=CALL
+.*
+.CMDX99  ANOP  ,
+         DC    AL1(0)                .reserved
+         AIF   ('&LENGTH' EQ '').CMD02
+         DC    AL2(&LENGTH)          .length
+         AIF   ('&COMMAND' EQ '').CMD03
+         DC    CL16&COMMAND          .command
+         MEXIT ,
+.*
+.**      TYPE=FINAL
+.*
+.CMDFINI ANOP  ,
+         DS    0F                    .
+         DC    AL4(-1)               .final table entry
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.CMDLIST ANOP  ,
+COMMAND  DSECT ,
+CMDEPA   DS    A                     .EPA
+CMDSAF   DS    XL1                   .SAF={CALL|NO}
+CMD@NO   EQU   X'00'                 .SAF=NOCALL
+CMD@CALL EQU   X'80'                 .SAF=CALL
+CMDRSV   DS    AL1                   .-reserved
+CMDLEN   DS    AL2                   .length
+CMDTEXT  DS    CL16                  .command
+CMD@SZE  EQU   *-COMMAND             .entry size
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.CMD00   MNOTE 8,'*** CMD invalid DSECT operand specified'
+         MEXIT ,
+.CMD01   MNOTE 8,'*** CMD invalid EP operand specified'
+         MEXIT ,
+.CMD02   MNOTE 8,'*** CMD invalid LENGTH operand specified'
+         MEXIT ,
+.CMD03   MNOTE 8,'*** CMD invalid COMMAND operand specified'
+         MEXIT ,
+.CMD04   MNOTE 8,'*** CMD invalid SAF operand specified'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate EOM listener table                                  *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENEOM  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').EOMLIST
+         AIF   ('&DSECT' NE 'NO').EOM00
+         AIF   ('&TYPE' EQ 'INITIAL').EOMINIT
+         AIF   ('&TYPE' EQ 'FINAL').EOMFINI
+         AIF   ('&TYPE' EQ 'ENTRY').EOMENTY
+         AGO   .EOM01
+.*
+.**      TYPE=INITIAL
+.*
+.EOMINIT ANOP  ,
+         DS    0F                    .initial table entry
+         MEXIT ,
+.*
+.**      TYPE=ENTRY
+.*
+.EOMENTY ANOP  ,
+         DS    0F
+         AIF   ('&EP' EQ '').EOM01   .
+         DC    A(&EP)                .EPA
+         DC    A(0)                  .reserved
+         MEXIT ,
+.*
+.**      TYPE=FINAL
+.*
+.EOMFINI ANOP  ,
+         DS    0F                    .
+         DC    AL4(-1)               .final table entry
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.EOMLIST ANOP  ,
+EOM      DSECT ,
+EOMEPA   DS    A                     .EPA
+EOMRSV1  DS    A                     .-reserved
+EOM@SIZE EQU   *-EOM                 .entry size
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.EOM00   MNOTE 8,'*** EOM invalid DSECT operand specified'
+         MEXIT ,
+.EOM01   MNOTE 8,'*** EOM invalid EP operand specified'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate subsystem server exit listener table                *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENXIT  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').XITLIST
+         AIF   ('&DSECT' NE 'NO').XIT00
+         AIF   ('&TYPE' EQ 'INITIAL').XITINIT
+         AIF   ('&TYPE' EQ 'FINAL').XITFINI
+         AIF   ('&TYPE' EQ 'ENTRY').XITENTY
+         AGO   .XIT01
+.*
+.**      TYPE=INITIAL
+.*
+.XITINIT ANOP  ,
+         DS    0F                    .initial table entry
+         MEXIT ,
+.*
+.**      TYPE=ENTRY
+.*
+.XITENTY ANOP  ,
+         DS    0F
+         AIF   ('&EP' EQ '').XIT01
+         DC    A(&EP)                .EPA
+.*
+         AIF   ('&JMR' EQ 'NO').NOJMR
+         AIF   ('&JMR' NE 'YES').XIT05
+         DC    XL1'80'               .JMR available
+         AGO   .SUBSYS
+.NOJMR   ANOP  ,
+         DC    XL1'00'               .JMR not available
+.*
+.SUBSYS  ANOP  ,
+         AIF   ('&SSN' EQ 'NO').NOSUB
+         AIF   ('&SSN' NE 'YES').XIT06
+         DC    XL1'80'               .SUBSYS name available
+         AGO   .SMFREC
+.*
+.NOSUB   ANOP  ,
+         DC    XL1'00'               .SUBSYS name not available
+.*
+.SMFREC  ANOP  ,
+         AIF   ('&SMF' EQ 'NO').NOSMF
+         AIF   ('&SMF' NE 'YES').XIT03
+         DC    XL1'80'               .SMF recording allowed
+         AGO   .MODE
+.*
+.NOSMF   ANOP  ,
+         DC    XL1'00'               .SMF recording not allowed
+.*
+.MODE    ANOP  ,
+         AIF   ('&MODE' EQ 'TCB').MDTCB
+         AIF   ('&MODE' NE 'SRB').XIT07
+         DC    XL1'80'               .SRB mode
+         AGO   .QUEUE
+.*
+.MDTCB   ANOP  ,
+         DC    XL1'00'               .TCB mode
+.*
+.QUEUE   ANOP  ,
+         AIF   ('&QUEUE' EQ '').XIT02
+         DC    CL8'&QUEUE'           .ENQ/DEQ minor name
+.*
+         AIF   ('&EXIT' EQ '').XIT04
+         DC    CL8'&EXIT'            .exit ID
+         MEXIT ,
+.*
+.**      TYPE=FINAL
+.*
+.XITFINI ANOP  ,
+         DS    0F                    .
+         DC    AL4(-1)               .final table entry
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.XITLIST ANOP  ,
+XIT      DSECT ,
+XITEPA   DS    A                     .exit EPA
+XITJMR   DS    XL1                   .JMR
+XIT@JMR  EQU   X'80'                 .-JMR supplied
+XITSSN   DS    XL1                   .SUBSYS
+XIT@SSN  EQU   X'80'                 .-sybsystem name supplied
+XITSMF   DS    XL1                   .SMF
+XIT@SMF  EQU   X'80'                 .-SMF recording allowed
+XITMODE  DS    XL1                   .execution mode
+XIT@SRB  EQU   X'80'                 .-SRB mode
+XITMINR  DS    CL8                   .exit queue minor
+XITNAME  DS    CL8                   .exit name
+XIT@SIZE EQU   *-XIT                 .entry size
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.XIT00   MNOTE 8,'*** XIT invalid DSECT operand specified'
+         MEXIT ,
+.XIT01   MNOTE 8,'*** XIT invalid EP operand specified'
+         MEXIT ,
+.XIT02   MNOTE 8,'*** XIT invalid MINOR operand specified'
+         MEXIT ,
+.XIT03   MNOTE 8,'*** XIT invalid SMF operand specified'
+         MEXIT ,
+.XIT04   MNOTE 8,'*** XIT invalid EXIT operand specified'
+         MEXIT ,
+.XIT05   MNOTE 8,'*** XIT invalid JMR operand specified'
+         MEXIT ,
+.XIT06   MNOTE 8,'*** XIT invalid SSN operand specified'
+         MEXIT ,
+.XIT07   MNOTE 8,'*** XIT invalid MODE operand specified'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate subsystem server message table                      *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENMSG  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').MSGLIST
+         AIF   ('&DSECT' NE 'NO').MSG00
+         AIF   ('&TYPE' EQ 'INITIAL').MSGINIT
+         AIF   ('&TYPE' EQ 'FINAL').MSGFINI
+         AIF   ('&TYPE' EQ 'ENTRY').MSGENTY
+         AGO   .MSG01
+.*
+.**      TYPE=INITIAL
+.*
+.MSGINIT ANOP  ,
+         DS    0F                    .initial table entry
+         MEXIT ,
+.*
+.**      TYPE=ENTRY
+.*
+.MSGENTY ANOP  ,
+         DS    0F
+         AIF   ('&EP' EQ '').MSG01   .
+         DC    A(&EP)                .EPA
+         DC    A(0)                  .reserved
+         MEXIT ,
+.*
+.**      TYPE=FINAL
+.*
+.MSGFINI ANOP  ,
+         DS    0F                    .
+         DC    AL4(-1)               .final table entry
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.MSGLIST ANOP  ,
+MSG      DSECT ,
+MSGEPA   DS    A                     .EPA
+MSGRSV1  DS    A                     .-reserved
+MSG@SIZE EQU   *-MSG                 .entry size
+         MEXIT ,
+.*
+.**      Macro Notes
+.*
+.MSG01   MNOTE 8,'*** MSG invalid EP operand specified'
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Generate Dynamic Exits Facility system exits table           *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENDYN  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').DYNLIST
+ZDYNTBLE DS    0F
+         ENTRY ZDYNTBLE
+EMFUTL   DS    0F
+         DC    AL04(XSAUTLQ-XSA)     staged queue address offset
+         DC    AL04(ZEVTUTLQ-ZEVT)   common queue address offset
+         DC    CL08'IEFUTL'          SMF exit name
+         DC    CL08'ZEMFUTL'         ZEMF exit module name
+         DC    CL16'SYS.IEFUTL'      SYS dynamic exit name
+EMFUSO   DS    0F
+         DC    AL04(XSAUSOQ-XSA)     staged queue address offset
+         DC    AL04(ZEVTUSOQ-ZEVT)   common queue address offset
+         DC    CL08'IEFUSO'          SMF exit name
+         DC    CL08'ZEMFUSO'         ZEMF exit module name
+         DC    CL16'SYS.IEFUSO'      SYS dynamic exit name
+EMFUJP   DS    0F
+         DC    AL04(XSAUJPQ-XSA)     staged queue address offset
+         DC    AL04(ZEVTUJPQ-ZEVT)   common queue address offset
+         DC    CL08'IEFUJP'          SMF exit name
+         DC    CL08'ZEMFUJP'         ZEMF exit module name
+         DC    CL16'SYS.IEFUJP'      SYS dynamic exit name
+EMFU29   DS    0F
+         DC    AL04(XSAU29Q-XSA)     staged queue address offset
+         DC    AL04(ZEVTU29Q-ZEVT)   common queue address offset
+         DC    CL08'IEFU29'          SMF exit name
+         DC    CL08'ZEMFU29'         ZEMF exit module name
+         DC    CL16'SYS.IEFU29'      SYS dynamic exit name
+EMFU29L  DS    0F
+         DC    AL04(XSA29LQ-XSA)     staged queue address offset
+         DC    AL04(ZEVT29LQ-ZEVT)   common queue address offset
+         DC    CL08'IEFU29L'         SMF exit name
+         DC    CL08'ZEMF29L'         ZEMF exit module name
+         DC    CL16'SYS.IEFU29L'     SYS dynamic exit name
+EMFU83   DS    0F
+         DC    AL04(XSAU83Q-XSA)     staged queue address offset
+         DC    AL04(ZEVTU83Q-ZEVT)   common queue address offset
+         DC    CL08'IEFU83'          SMF exit name
+         DC    CL08'ZEMFU83'         ZEMF exit module name
+         DC    CL16'SYS.IEFU83'      SYS dynamic exit name
+EMFU84   DS    0F
+         DC    AL04(XSAU84Q-XSA)     staged queue address offset
+         DC    AL04(ZEVTU84Q-ZEVT)   common queue address offset
+         DC    CL08'IEFU84'          SMF exit name
+         DC    CL08'ZEMFU84'         ZEMF exit module name
+         DC    CL16'SYS.IEFU84'      SYS dynamic exit name
+EMFU85   DS    0F
+         DC    AL04(XSAU85Q-XSA)     staged queue address offset
+         DC    AL04(ZEVTU85Q-ZEVT)   common queue address offset
+         DC    CL08'IEFU85'          SMF exit name
+         DC    CL08'ZEMFU85'         ZEMF exit module name
+         DC    CL16'SYS.IEFU85'      SYS dynamic exit name
+EMFU86   DS    0F
+         DC    AL04(XSAU86Q-XSA)     staged queue address offset
+         DC    AL04(ZEVTU86Q-ZEVT)   common queue address offset
+         DC    CL08'IEFU86'          SMF exit name
+         DC    CL08'ZEMFU86'         ZEMF exit module name
+         DC    CL16'SYS.IEFU86'      SYS dynamic exit name
+EMFU86SZ EQU   *-EMFU86              entry size
+ZDYNTBSZ EQU   *-ZDYNTBLE
+ZDYNTABE EQU   (*-ZDYNTBLE)/EMFU86SZ number of entries
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.DYNLIST ANOP  ,
+DYNX     DSECT ,
+DYNSTGEQ DS    A                     .staged queue address offset
+DYNCOMMQ DS    A                     .common queue address offset
+DYNEXTNM DS    CL8                   .SMF exit name
+DYNMODNM DS    CL8                   .ZEMF SYS exit module name
+DYNDYNAM DS    CL16                  .SYS dynamic exit name
+DYN@SIZE EQU   *-DYNX                .entry size
+         MEXIT ,
+.*--------------------------------------------------------------------*
+.*                                                                    *
+.*       Exit subsystem IDs parameter table                           *
+.*        +00 keyword length                                          *
+.*        +02 subsystem ID length                                     *
+.*        +03 subsystem type                                          *
+.*        +04 subsystem name                                          *
+.*        +08 keyword name                                            *
+.*                                                                    *
+.*-------+---------+---------+---------+---------+---------+---------+*
+.GENKEY  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').KEYLIST
+KEYTAB   DS    0F
+         ENTRY KEYTAB
+KEYOMVS  DC    AL2(05),AL1(04),AL1(XQE@OMVS),CL4'OMVS',CL8'OMVS('
+KEYASCH  DC    AL2(05),AL1(04),AL1(XQE@ASCH),CL4'ASCH',CL8'ASCH('
+KEYSTC   DC    AL2(04),AL1(03),AL1(XQE@STC),CL4'STC',CL8'STC('
+KEYTSO   DC    AL2(04),AL1(03),AL1(XQE@TSO),CL4'TSO',CL8'TSO('
+KEYJESN  DC    AL2(04),AL1(03),AL1(XQE@JOB),CL4'JES2',CL8'JOB('
+KEYLAST  DC    AL4(-1),CL12' '
+KEYTABSZ EQU   *-KEYLAST
+KEYTENTY EQU   (*-KEYTAB)/KEYTABSZ
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.KEYLIST ANOP  ,
+XKEY     DSECT ,
+XKEYLEN  DS    AL2              keword length
+XKEYSUBL DS    AL1              subsystem ID length
+XKEYTYPE DS    AL1              {JOB|STC|TSO|OMVS|ASCH}
+XKEYSUBN DS    CL4              {JES2/3|TSO|STC|OMVS|ASCH}
+XKEYNAME DS    CL8              keyword name
+XKEY@SZE EQU   *-XKEY
+         MEXIT ,
+*---------------------------------------------------------------------*
+*                                                                     *
+*        Variables name table                                         *
+*         +00 variable name length                                    *
+*         +02 variable data max length                                *
+*         +04 variable name                                           *
+*                                                                     *
+*--------+---------+---------+---------+---------+---------+---------+*
+.GENVAR  ANOP  ,
+         AIF   ('&DSECT' EQ 'YES').VARLIST
+VARTABLE DS    0F
+         ENTRY VARTABLE
+         DC    AL2(07),AL2(44),CL8'&&DSNAME'
+         DC    AL2(08),AL2(08),CL8'&&JOBNAME'
+VARTLAST DS    0F
+         DC    AL4(-1),CL8' '
+VARTBLSZ EQU   *-VARTLAST
+VARTBLNM EQU   (*-VARTABLE)/VARTBLSZ
+         MEXIT ,
+.*
+.**      DSECT=YES
+.*
+.VARLIST ANOP  ,
+XVAR     DSECT ,
+XVARNTY  DS    0F
+XVARNLEN DS    AL2              variable name length
+XVARMDTA DS    AL2              max variable data length
+XVARNAME DS    CL8              variable name
+XVAR@SZE EQU   *-XVAR
+         MEXIT ,
+         MEND  ,

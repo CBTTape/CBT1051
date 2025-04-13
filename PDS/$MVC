@@ -1,0 +1,35 @@
+.*/*******************************************************************/
+.*/*                                                                 */
+.*/* Name: $MVC                                                      */
+.*/*                                                                 */
+.*/* Description: Authorized MVS macro                               */
+.*/*                                                                 */
+.*/* Notes: High order 3 bytes &KEY fullword must be zero.           */
+.*/*                                                                 */
+.*/* © Copyright Ben Marino. 2023 - 2024 (unpublished)               */
+.*/*                                                                 */
+.*/*******************************************************************/
+.*---------------------------CHANGE LOG-------------------------------*
+.*                                                                    *
+.* ID    Rel    Date       Author        Comments                     *
+.*--------------------------------------------------------------------*
+.* @00 | V1R1 | 09242023 | Ben Marino  | Initial version              *
+.*     |      |          |             |                              *
+.**********************************************************************
+.*-------+---------+---------+---------+---------+---------+---------+*
+         MACRO
+&ZID     $MVC  &TARGET,&SOURCE,&KEY=DSAEKEY,&WRKREG=15
+.*
+         LCLC  &XVC
+&XVC     SETC  'XOI'.'&SYSNDX'
+.*
+         ICM   &WRKREG,B'0001',&KEY+3  .key zero?
+         BZ    &XVC                    .yes
+         SPKA  0(0)                    .supervisor key
+&XVC     DS    0H
+         MVC   &TARGET,&SOURCE         .update target
+         ICM   &WRKREG,B'0001',&KEY+3  .key zero?
+         BZ    &XVC.A
+         SPKA  0(&WRKREG)              .restore my key
+&XVC.A   DS    0H
+         MEND

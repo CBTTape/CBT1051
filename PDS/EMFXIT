@@ -1,0 +1,3268 @@
+EMFXIT   CSECT
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        EMFXIT                                              */
+*/*                                                                  */
+*/* Function:    Dynamic Exit Facility exit listener                 */
+*/*                                                                  */
+*/* Description: Receives control from the MVS Dynamic Exits         */
+*/*              Facility to process the following exit entry        */
+*/*              calls:                                              */
+*/*                                                                  */
+*/*              IEFUTL    Time limit exit                           */
+*/*              IEFUSO    SYSOUT limit exit                         */
+*/*              IEFUJP    Job purge exit                            */
+*/*              IEFU29    SMF dump exit                             */
+*/*              IEFU29L   SMF log stream dump exit                  */
+*/*              IEFU83    SMF record exit                           */
+*/*              IEFU84    SMF record exit                           */
+*/*              IEFU85    SMF record exit                           */
+*/*              IEFU86    SMF record exit                           */
+*/*                                                                  */
+*/* Input ARs:   AR0 ZEMF parameter                                  */
+*/*              AR1 ZEMF parameter                                  */
+*/*                                                                  */
+*/* Input Regs:  R0  Exit parameter                                  */
+*/*              R1  Exit parameter                                  */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry point address                             */
+*/*                                                                  */
+*/* Regs Usage:  R7  XIT  address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              Reentrant                                           */
+*/*              Caller key                                          */
+*/*              Caller state                                        */
+*/*              Page-fixed                                          */
+*/*              Write-protected                                     */
+*/*              Dynamic-LPA resident                                */
+*/*                                                                  */
+*/* Copyright:   Ben Marino. 2021 - 2024 (unpublished)               */
+*/*                                                                  */
+*/********************************************************************/
+*---------------------------CHANGE LOG--------------------------------*
+*                                                                     *
+* ID    Rel    Date       Author        Comments                      *
+*---------------------------------------------------------------------*
+* @01 | V1R1 | 09242023 | Ben Marino  | Initial version               *
+* @02 | V1R1 | 02072024 | Ben Marino  | Serviceability enhancements   *
+*     |      |          |             |                               *
+*     |      |          |             |                               *
+***********************************************************************
+*--------+---------+---------+---------+---------+---------+---------+*
+EMFXIT   AMODE 31
+EMFXIT   RMODE ANY
+         COPY  ZGBLS
+         USING EMFXIT,R15              Entry
+         STM   R14,R12,GPR@R14(R13)    caller regs
+         B     XITMAIN                 branch
+         ZMACS GEN=MID,DSECT=NO        MID
+*
+**       Base addressability
+*
+XITMAIN  DS    0H
+         DROP  R15
+         LR    R10,R15                 base
+         USING EMFXIT,R10
+         LR    R3,R0                   protect exit parm
+         LR    R4,R1                   protect exit parm
+         EAR   R5,AR0                  protect ZEMF parm
+         EAR   R6,AR1                  protect ZEMF parm
+         XR    R7,R7                   mi piace pulito
+         IAC   R7                      insert ASC-mode
+         SAC   0                       set primary ASC-mode
+*
+**       Obtain dynamic storage area
+*
+         IPK   ,                       caller key
+         STORAGE OBTAIN,LOC=ANY,COND=NO,                               +
+               LENGTH=DSA@SIZE,SP=&SP230,KEY=(R2),LINKAGE=SYSTEM
+         LR    R12,R1
+         USING DSA,R12
+         LA    R1,DSA@SIZE             DSA size
+         LR    R0,R12                  DSA address
+         XR    R15,R15                 zero
+         MVCL  R0,R14                  scrub
+         ST    R13,GPR@BWD(,R12)
+         ST    R12,GPR@FWD(,R13)       c
+         LR    R13,R12                 savearea
+         ST    R2,DSAEKEY              save caller key
+         ST    R7,DSAASCM              save caller ASC-mode
+         STM   R3,R4,DSAXPAR           save exit parms
+         STM   R5,R6,DSAEXIT           save ZEMF parms
+         MVC   DSAOGR0,DSAGPR0         copy exit parm
+         MVC   DSAOGR1,DSAGPR1         copy exit parm
+*
+**       Set non-cross-memory environment
+*
+         ZCALL EP=SETPASN
+         STG   R15,DSASASN             save SASN
+*
+**       Copy STOKEN & Subsystem name
+*
+         USING PSA,0
+         L     R3,PSAAOLD              ASCB
+         USING ASCB,R3
+         L     R4,ASCBOUCB             OUCB
+         USING OUCB,R4
+         MVC   DSASUBNM,OUCBSUBN       copy subsystem name         @02C
+         L     R4,ASCBASSB             ASSB
+         USING ASSB,R4
+         MVC   DSASTOKN,ASSBSTKN       copy STOKEN
+         DROP  R3,R4
+*
+**       Validity check server status
+*
+         MVC   DSARSN,=AL4(RSN104)     RSN
+         L     R11,=V(EMFSRV)          readonly ZEVT
+         USING ZEVT,R11
+         ICM   R11,15,ZEVTZEVT         R/W ZEVT?
+         BZ    XITABEND                no
+         CLC   ZEVTID,=CL4'ZEVT'       valid?
+         BNE   XITABEND                no
+         TM    ZEVTFLG1,ZEVT@INI       server initialized?
+         BZ    XITEXIT                 no
+         TM    ZEVTFLG1,ZEVT@ACT       server active?
+         BZ    XITEXIT                 no
+         ZTRCE XIT=A,LINKAGE=BRANCH    trace
+*
+**       Initialize recovery workarea
+*
+         TM    ZEVTFLG2,ZEVT@RCV       RCV=YES?
+         BZ    XIT0030                 no, skip recovery
+         LA    R9,DSAZRWA              ZRWA
+         USING ZRWA,R9
+         ST    R11,ZRWAZEVT            ZEVT
+         MVC   ZRWAID,=CL4'ZRWA'       ID
+         MVC   ZRWAXMOD,MIDNAME        mainline
+         MVC   ZRWAXECT,MIDNAME        mainline
+         MVC   ZRWASUBN,ZEVTSUBN       server name
+*
+**       Establish FRR recovery
+*
+         SPKA  0(0)                    supervisor key
+         ICM   R3,15,PSATOLD           SRB-mode?
+         BZ    XIT0000                 yes
+         CLC   ZEVTXMSM,DSAASCM        cross-memory mode?
+         BE    XIT0000                 yes
+         SETLOCK TEST,TYPE=LOCAL,                                      +
+               BRANCH=(NOTHELD,XIT0010)
+         OI    ZRWAFRR,ZRWA@LCK        lock held by caller
+         ZTRCE XIT=B,LINKAGE=BRANCH    trace
+*
+XIT0000  DS    0H
+         L     R3,=V(EMFFRR)           EMFFRR
+         BSM   R3,0                    AMODE
+         SETFRR A,FRRAD=(R3),                                          +
+               PARMAD=(R4),            workarea address                +
+               MODE=FULLXM,            preserve XM-mode                +
+               SDWALOC31=YES,          31-bit SDWA                     +
+               EUT=YES,                EUT FRR                         +
+               CANCEL=NO,              donot interrupt                 +
+               WRKREGS=(R14,R15)
+         USING FRR,R4
+         MVC   FRRID,=CL3'FRR'         ID
+         ST    R8,ZRWAFRRA             init FRR address
+         ST    R9,FRRZRWA              init ZRWA address
+         ST    R11,FRRZEVT             init ZXVT address
+         OI    DSAFLG1,DSA@FRRA        recovery established
+         L     R2,DSAEKEY              caller key
+         SPKA  0(R2)                   restore key
+         MVC   DSARSN,=AL4(RSN136)     ESTAEX recovery
+         ZTRCE XIT=C,LINKAGE=BRANCH    trace
+         B     XIT0020                 carry on
+         DROP  R4
+*
+**       Establish ESTAEX recovery
+*
+XIT0010  DS    0H
+         MVC   DSAPLST(ESTAEXL),ESTAEX
+         MVC   DSARSN,=AL4(RSN108)     RSN
+         L     R3,=V(EMFRTM)           EMFRTM
+         BSM   R3,0                    AMODE
+         ESTAEX (R3),                                                  +
+               PARAM=(R9),             ZRWA                            +
+               TOKEN=DSATOKN,          token                           +
+               MF=(E,DSAPLST)
+         LTR   R15,R15                 successful?
+         BNZ   XITABEND                no
+         OI    DSAFLG1,DSA@STAE        recovery established
+         MVC   DSARSN,=AL4(RSN112)     ESTAEX recovery
+         ZTRCE XIT=D,LINKAGE=BRANCH    trace
+*
+**       Set recovery retry address
+*
+XIT0020  DS    0H
+         ZRETRY XITEXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               MOD=MIDNAME,            mainline                        +
+               SRV=MIDNAME,            mainline                        +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN=DSARSN              ABEND RSN
+         ZTRCE XIT=E,LINKAGE=BRANCH    trace
+*
+**       Update exit listener entry count
+*
+XIT0030  DS    0H
+         SPKA  0(0)                    supervisor key
+         L     R2,ZEVTXITC             listener count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXITC          update count
+         BNE   XIT0030+4               changed: try again
+         L     R2,DSAEKEY              caller key
+         SPKA  0(R2)                   restore key
+         ZTRCE XIT=F,LINKAGE=BRANCH    trace
+*
+**       Locate exit listener routine
+*
+         LA    R7,XITTABLE             listener table
+         USING XIT,R7
+         ZTRCE XIT=G,LINKAGE=BRANCH    trace
+*
+XIT0040  DS    0H
+         CLC   XITEPA,XITTBEND         end of table?
+         BNE   XIT0050                 no
+         MVC   DSARSN,=AL4(RSN116)     RSN
+         ZTRCE XIT=H,LINKAGE=BRANCH    trace
+         B     XITABEND                exit
+*
+XIT0050  DS    0H
+         CLC   XITNAME,DSAEXIT         exit name match?
+         BE    XIT0060                 yes
+         LA    R7,XIT@SIZE(,R7)        no, next entry
+         ZTRCE XIT=I,LINKAGE=BRANCH    trace
+         B     XIT0040                 loop
+*
+**       Copy Job Management Record data
+*
+XIT0060  DS    0H
+         ST    R7,DSAXITA              init XIT address
+         CLI   XITJMR,XIT@JMR          JMR=YES?
+         BNE   XIT0070                 no
+         L     R2,DSAGPR1              parmlist
+         L     R3,0(,R2)               JMR address
+         USING JMR,R3
+         XR    R1,R1
+         IC    R1,JMRSTEP              step number
+         ST    R1,DSASTEP              save it
+         MVC   DSAJOBNM,JMRJOB         copy jobname
+         ZTRCE XIT=J,LINKAGE=BRANCH    trace
+*
+**       Copy related subsystem name
+*
+         CLI   XITSSN,XIT@SSN          SSN=YES?
+         BNE   XIT0080                 no
+         L     R3,4(,R2)               subsystem name ptr
+         MVC   DSASUBNM,0(R3)          {JES2/3|TSO|STC|OMVS|ASCH}
+         ZTRCE XIT=K,LINKAGE=BRANCH    trace
+         B     XIT0080
+         DROP  R3
+*
+**       Locate Job Management Record
+*
+XIT0070  DS    0H
+         ZCALL SR=LOCJMR
+         ZTRCE XIT=L,LINKAGE=BRANCH    trace
+*
+**       Serialize exit resources
+*
+XIT0080  DS    0H
+         TM    DSAFLG1,DSA@FRRA        FRR active?
+         BNZ   XIT0090                 yes, skip serialization
+         MVC   DSAPLST(XITENQL),XITENQ
+         LA    R2,ZEVTQNAM             major
+         LA    R3,XITMINR              minor
+         ENQ   ((R2),(R3)),                                            +
+               LINKAGE=SYSTEM,MF=(E,DSAPLST)
+         OI    DSAFLG1,DSA@RENQ        ENQ indicator
+         ZTRCE XIT=M,LINKAGE=BRANCH    trace
+*
+**       Call exit processing routine
+*
+XIT0090  DS    0H
+         LM    R0,R1,DSAXPAR           set parm regs
+         L     R15,XITEPA              routine EPA
+         BSM   R15,0                   set AMODE
+         BASR  R14,R15                 call exit routine
+         STM   R15,R1,DSAOPAR          RC; RSN; parm
+         ZTRCE XIT=N,LINKAGE=BRANCH    trace
+*
+**       Set recovery retry address
+*
+XIT0099  DS    0H
+         MVC   ZRWASECT,MIDNAME        ID mainline
+         ZRETRY XITEXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               MOD=MIDNAME,            mainline                        +
+               SRV=MIDNAME,            mainline                        +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN120)        ABEND RSN
+         ZTRCE XIT=O,LINKAGE=BRANCH    trace
+*
+**       Release exit resources serialization
+*
+XITEXIT  DS    0H
+         TM    DSAFLG1,DSA@RENQ        active ENQ?
+         BZ    XITXIT00                no
+         NI    DSAFLG1,XFF-DSA@RENQ    reset ENQ indicator
+         MVC   DSAPLST(XITDEQL),XITDEQ
+         LA    R2,ZEVTQNAM             major
+         LA    R3,XITMINR              minor
+         DEQ   ((R2),(R3)),                                            +
+               LINKAGE=SYSTEM,MF=(E,DSAPLST)
+         ZTRCE XIT=P,LINKAGE=BRANCH    trace
+*
+**       Delete ESTAEX recovery
+*
+XITXIT00 DS    0H
+         TM    DSAFLG1,DSA@STAE        ESTAEX active?
+         BZ    XITXIT10                no
+         NI    DSAFLG1,XFF-DSA@STAE    reset indicator
+         ESTAEX 0,TOKEN=DSATOKN        deactivate recovery
+         ZTRCE XIT=Q,LINKAGE=BRANCH    trace
+         B     XITXIT20
+*
+**       Delete FRR recovery
+*
+XITXIT10 DS    0H
+         TM    DSAFLG1,DSA@FRRA        FRR active?
+         BZ    XITXIT20                no
+         TM    ZRWAFRR,ZRWA@DEL        deleted by EMFFRR?
+         BNZ   XIT0020                 yes
+         SPKA  0(0)                    supervisor key
+         SETFRR D,WRKREGS=(R14,R15)    delete FRR
+*
+**       Restore cross-memory environment
+*
+XITXIT20 DS    0H
+         LTG   R1,DSASASN              restore required?
+         BZ    XITXIT30                no
+         ZCALL EP=SETSASN              restore SASN
+*
+**       Storage relaase dynamic storage area
+*
+XITXIT30 DS    0H
+         L     R3,DSAASCM              caller ASC-mode
+         L     R2,DSAEKEY              caller key
+         SPKA  0(R2)                   restore caller key
+         LM    R15,R1,DSAOPAR          protect exit parms
+         L     R13,GPR@BWD(,R13)       caller savearea
+         STM   R15,R1,GPR@R15(R13)     return exit parms
+         STORAGE RELEASE,COND=NO,SP=&SP230,KEY=(R2),                   +
+               ADDR=(R12),LENGTH=DSA@SIZE,LINKAGE=SYSTEM
+*
+**       Return to exit routine caller
+*
+         SAC   0(R3)                   restore ASC-mode
+         LM    R2,R12,GPR@R2(R13)      restore regs
+         L     R14,GPR@R14(,R13)       return address
+         BR    R14                     exit
+*---------------------------------------------------------------------*
+**       ABEND Exit Routine                                           *
+*---------------------------------------------------------------------*
+XITABEND DS    0H
+         ZRETRY OFF,ZRWA=DSAZRWA       disable recovery
+         L     R2,DSARSN
+         ABEND &UCODE,DUMP,REASON=(R2)
+*---------------------------------------------------------------------*
+*        Constants                                                    *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ESTAEX   ESTAEX 0,MF=L                 listform
+ESTAEXL  EQU   *-ESTAEX
+*---------------------------------------------------------------------*
+*        ENQ/DEQ exit queue serialization                             *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+XITENQ   ENQ   (0,0,E,8,SYSTEM),RET=HAVE,LINKAGE=SYSTEM,MF=L
+XITENQL  EQU   *-XITENQ
+         DS    0F
+XITDEQ   DEQ   (0,0,8,SYSTEM),LINKAGE=SYSTEM,MF=L
+XITDEQL  EQU   *-XITDEQ
+*---------------------------------------------------------------------*
+*        Listener Exit Routine Table                                  *
+*--------+---------+---------+---------+---------+---------+---------+*
+XITTABLE DS    0F
+         ZTABS GEN=XIT,TYPE=INITIAL    exit table
+*
+         ZTABS GEN=XIT,                                                +
+               TYPE=ENTRY,                                             +
+               EP=IEFUTL,              IEFUTL time limit expiration    +
+               JMR=YES,                JMR available                   +
+               SSN=YES,                SUBSYS name is available        +
+               SMF=YES,                SMF recording is allowed        +
+               MODE=TCB,               TCB mode exit                   +
+               EXIT=IEFUTL,            exit routine name               +
+               QUEUE=ZEVTUTLQ          exit resources queue name
+*
+         ZTABS GEN=XIT,                                                +
+               TYPE=ENTRY,                                             +
+               EP=IEFUSO,              IEFUSO SUSOUT limit             +
+               JMR=YES,                JMR available                   +
+               SSN=NO,                 SUBSYS name not available       +
+               SMF=YES,                SMF recording is allowed        +
+               MODE=TCB,               TCB mode exit                   +
+               EXIT=IEFUSO,            exit routine name               +
+               QUEUE=ZEVTUSOQ          exit resources queue name
+*
+         ZTABS GEN=XIT,                                                +
+               TYPE=ENTRY,                                             +
+               EP=IEFUJP,              IEFUJP job purge                +
+               JMR=YES,                JMR available                   +
+               SSN=NO,                 SUBSYS name not available       +
+               SMF=NO,                 SMF recording not allowed       +
+               MODE=TCB,               TCB mode exit                   +
+               EXIT=IEFUJP,            exit routine name               +
+               QUEUE=ZEVTUJPQ          exit resources queue name
+*
+         ZTABS GEN=XIT,                                                +
+               TYPE=ENTRY,                                             +
+               EP=IEFU29,              IEFU29 SMF dump                 +
+               JMR=NO,                 JMR unavailable                 +
+               SSN=NO,                 SUBSYS name not available       +
+               SMF=NO,                 SMF recording not allowed       +
+               MODE=TCB,               TCB mode exit                   +
+               EXIT=IEFU29,            exit routine name               +
+               QUEUE=ZEVTU29Q          exit resources queue name
+*
+         ZTABS GEN=XIT,                                                +
+               TYPE=ENTRY,                                             +
+               EP=IEFU29L,             IEFU29L log stream dump         +
+               JMR=NO,                 JMR unavailable                 +
+               SSN=NO,                 SUBSYS name not available       +
+               SMF=NO,                 SMF recording not allowed       +
+               MODE=TCB,               TCB mode exit                   +
+               EXIT=IEFU29L,           exit routine name               +
+               QUEUE=ZEVT29LQ          exit resources queue name
+*
+         ZTABS GEN=XIT,                                                +
+               TYPE=ENTRY,                                             +
+               EP=IEFU83,              IEFU83 SMF record               +
+               JMR=NO,                 JMR unavailable                 +
+               SSN=NO,                 SUBSYS name not available       +
+               SMF=NO,                 SMF recording not allowed       +
+               MODE=TCB,               TCB mode exit                   +
+               EXIT=IEFU83,            exit routine name               +
+               QUEUE=ZEVTU83Q          exit resources queue name
+*
+         ZTABS GEN=XIT,                                                +
+               TYPE=ENTRY,                                             +
+               EP=IEFU84,              IEFU84 SMF record               +
+               JMR=NO,                 JMR unavailable                 +
+               SSN=NO,                 SUBSYS name not available       +
+               SMF=NO,                 SMF recording not allowed       +
+               MODE=SRB,               SRB or TCB mode exit            +
+               EXIT=IEFU84,            exit routine name               +
+               QUEUE=ZEVTU84Q          exit resources queue name
+*
+         ZTABS GEN=XIT,                                                +
+               TYPE=ENTRY,                                             +
+               EP=IEFU85,              IEFU85 SMF record               +
+               JMR=NO,                 JMR unavailable                 +
+               SSN=NO,                 SUBSYS name not available       +
+               SMF=NO,                 SMF recording not allowed       +
+               MODE=TCB,               SRB or TCB mode exit            +
+               EXIT=IEFU85,            exit routine name               +
+               QUEUE=ZEVTU85Q          exit resources queue name
+*
+         ZTABS GEN=XIT,                                                +
+               TYPE=ENTRY,                                             +
+               EP=IEFU86,              IEFU86 SMF record               +
+               JMR=NO,                 JMR unavailable                 +
+               SSN=NO,                 SUBSYS name not available       +
+               SMF=NO,                 SMF recording not allowed       +
+               MODE=SRB,               SRB or TCB mode exit            +
+               EXIT=IEFU86,            exit routine name               +
+               QUEUE=ZEVTU86Q          exit resources queue name
+*
+XITTBEND DS    0F                      end of exit table
+         ZTABS GEN=XIT,TYPE=FINAL
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFUTL                                              */
+*/*                                                                  */
+*/* Function:    Time limit expiration exit routine                  */
+*/*                                                                  */
+*/* Description: Receives control when one of the following time     */
+*/*              limits expires:                                     */
+*/*              - Job processor time limit                          */
+*/*              - Step processor time limit                         */
+*/*              - Continuous wait time limit for the job            */
+*/*                                                                  */
+*/* Attributes:  IRB mode                                            */
+*/*              PSW key 0                                           */
+*/*              Supervisor state                                    */
+*/*                                                                  */
+*/* Input Regs:  R0  Entry reason code                               */
+*/*                  0 - Job time limit expired                      */
+*/*                  4 - Step time limit expired                     */
+*/*                  8 - Wait time limit expired                     */
+*/*                                                                  */
+*/*              R1  Parmlist address                                */
+*/*                  Word 1 - Common parameter are address           */
+*/*                  Word 2 - Subsystem name address                 */
+*/*                                                                  */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  ZEXT address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*                   4 - Grant extension in timer units             */
+*/*                   8 - Grant extension in seconds                 */
+*/*                  12 - Job processing should be cancelled         */
+*/*                                                                  */
+*/*               R1 Time extension                                  */
+*/*                  R15=4, R1 contains extension in timer units     */
+*/*                  R15=8, R1 contains extension in seconds         */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFUTL   ZMACS GEN=SUBENTY
+         USING ZEXT,R7
+         USING ZXQE,R8
+         USING ZRWA,R9
+         USING ZEVT,R11
+*
+**       Set recovery retry address
+*
+         ZRETRY UTLEXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=EMFUTL,             exit name                       +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN208)        RSN
+*
+**       Update listener entry count
+*
+         L     R2,ZEVTUTLC             listener count
+         LA    R2,1(,R2)               add one
+         ST    R2,ZEVTUTLC             update count
+*
+**       Update exit in flight count
+*
+UTL0000  DS   0H
+         L     R2,ZEVTXACT             inflight count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   UTL0000                 changed: try again
+*
+**       Copy current SMF job wait time
+*
+         USING PSA,0
+         L     R3,FLCCVT               CVT
+         USING CVT,R3
+         ICM   R3,15,CVTSMCA           SMCA?
+         BZ    UTL0010                 no
+         USING SMCABASE,R3
+         MVC   DSASIDI,SMCASID         SMF system ID
+         MVC   DSAJWTS,SMCAJWT         SMCA JWT() binary seconds
+         MVC   DSASJWT,SMCASJWT        SMFPRMxx JWT(hhmm) value
+         DROP  R0,R3
+         ZTRCE UTL=A,LINKAGE=LOCAL     trace
+*
+**       locate ZXQE element
+*
+UTL0010  DS    0H
+         MVC   DSAORC,=AL4(RC12)       set cancel job RC
+         ICM   R8,15,ZEVTUTLQ          ZXQEs queued?
+         BNZ   UTL0020                 yes
+         ZTRCE UTL=B,LINKAGE=LOCAL     trace
+         B     UTLEXIT                 exit
+*
+UTL0020  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        valid?
+         BE    UTL0030                 yes
+         ZTRCE UTL=C,LINKAGE=LOCAL     trace
+         B     UTLEXIT                 exit
+*
+UTL0030  DS    0H
+         ZCALL SR=LOCZXQE
+         LTR   R15,R15                 ZXQE found?
+         BZ    UTL0040                 yes
+         ZTRCE UTL=D,LINKAGE=LOCAL     trace
+         B     UTLEXIT                 exit
+*
+UTL0040  DS    0H
+         L     R7,DSAZEXT              returned ZEXT
+         USING ZEXT,R7
+         L     R8,DSAZXQE              returned ZXQE
+         ZTRCE UTL=E,LINKAGE=BRANCH    trace
+*
+**       Process job CPU time limit
+*
+UTL0100  DS    0H
+         MVC   DSAORC,=AL4(RC12)       cancel job RC
+         MVC   EXTSTOKN,DSASTOKN       copy STOKEN
+         CLC   DSAGPR0,CPUJLIM         job CPU time limit expired?
+         BNE   UTL0200                 no
+         TM    XQEUTLF1,XQE@JCPU       JOBCPU=NOLIMIT specified?
+         BZ    UTL0110                 no
+         MVC   DSAOGR1,CPUSECS         grant default CPU seconds
+         MVC   DSAORC,=AL4(8)          indicate seconds
+         ZTRCE UTL=F,LINKAGE=LOCAL     trace
+         B     UTL0150
+*
+UTL0110  DS    0H
+         ICM   R3,15,XQEJOBCP          CPU extensions allowed?
+         BNZ   UTL0120                 yes
+         OI    EXTFLG1,EXT@FREE        set free indicator
+         MVC   EXTFREE,=CL4'FREE'      mark it free
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   UTLCOMM                 yes, process common options
+         XC    EXTC(EXT@ZERO),EXTC     clear reused fields
+         ZTRCE UTL=G,LINKAGE=LOCAL     trace
+         B     UTLCOMM                 process common options
+*
+UTL0120  DS    0H
+         L     R3,EXTJOBXC             get granted extensions
+         CL    R3,XQEJOBXT             max extensions given?
+         BL    UTL0130                 no
+         OI    EXTFLG1,EXT@FREE        set free indicator
+         MVC   EXTFREE,=CL4'FREE'      mark it fre
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   UTL0125                 yes, skip clear
+         XC    EXTC(EXT@ZERO),EXTC     clear reused fields
+         ZTRCE UTL=H,LINKAGE=LOCAL     trace
+*
+**       Issue time limit exceeded msg
+*
+UTL0125  DS    0H
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    UTLCOMM                 no, process common options
+         ZWTO  MID=ZEMF81W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3==CL8'CPU'            show CPU time limit
+         B     UTLCOMM                 process common options
+*
+UTL0130  DS    0H
+         TM    XQEUTLF1,XQE@JBTU       TUJBCPU specified?
+         BZ    UTL0140                 no
+         MVC   DSAOGR1,XQEJOBCP        grant specified timer units
+         MVC   DSAORC,=AL4(4)          indicate timer units
+         ZTRCE UTL=I,LINKAGE=LOCAL     trace
+         B     UTL0150
+*
+UTL0140  DS    0H
+         MVC   DSAOGR1,XQEJOBCP        grant specified seconds
+         MVC   DSAORC,=AL4(8)          indicate seconds
+         ZTRCE UTL=J,LINKAGE=LOCAL     trace
+*
+UTL0150  DS    0H
+         L     R2,EXTJOBXC             JOBCPU extension added count
+         LA    R2,1(,R2)               add one
+         ST    R2,EXTJOBXC             update count
+         ZTRCE UTL=K,LINKAGE=LOCAL     trace
+*
+**       Issue time limit extension granted msg
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    UTLCOMM                 no, process common options
+         ZWTO  MID=ZEMF80W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3==CL8'CPU'            show CPU time limit
+         B     UTLCOMM                 process common options
+*                                      check SMF option
+**       Process step CPU time limit
+*
+UTL0200  DS    0H
+         MVC   DSAORC,=AL4(RC12)       cancel job RC
+         CLC   DSAGPR0,CPUSLIM         step CPU time limit expired?
+         BNE   UTL0300                 no
+         TM    XQEUTLF1,XQE@SCPU       STEPCPU=NOLIMIT specified?
+         BZ    UTL0210                 no
+         MVC   DSAOGR1,CPUSECS         grant default CPU seconds
+         MVC   DSAORC,=AL4(8)          indicate seconds
+         ZTRCE UTL=L,LINKAGE=LOCAL     trace
+         B     UTL0250
+*
+UTL0210  DS    0H
+         ICM   R3,15,XQESTPCP          CPU extensions allowed?
+         BNZ   UTL0220                 yes
+         OI    EXTFLG1,EXT@FREE        set free indicator
+         MVC   EXTFREE,=CL4'FREE'      mark it free
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   UTLCOMM                 yes, process common options
+         XC    EXTC(EXT@ZERO),EXTC     clear reused fields
+         ZTRCE UTL=M,LINKAGE=LOCAL     trace
+         B     UTLCOMM                 process common options
+*
+UTL0220  DS    0H
+         L     R3,EXTSTPXC             get granted extensions
+         CL    R3,XQESTPXT             max extensions given?
+         BL    UTL0230                 no
+         OI    EXTFLG1,EXT@FREE        set free indicator
+         MVC   EXTFREE,=CL4'FREE'      mark it free
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   UTL0225                 yes, skip clear
+         XC    EXTC(EXT@ZERO),EXTC     clear reused fields
+         ZTRCE UTL=N,LINKAGE=LOCAL     trace
+*
+**       Issue time limit exceeded msg
+*
+UTL0225  DS    0H
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    UTLCOMM                 no, process common options
+         ZWTO  MID=ZEMF81W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3==CL8'Step CPU'       show CPU time limit
+         B     UTLCOMM                 process common options
+*
+UTL0230  DS    0H
+         TM    XQEUTLF1,XQE@STTU       TUSTEPCPU specified?
+         BZ    UTL0240                 no
+         MVC   DSAOGR1,XQESTPCP        grant specified timer units
+         MVC   DSAORC,=AL4(4)          indicate timer units
+         ZTRCE UTL=O,LINKAGE=LOCAL     trace
+         B     UTL0250
+*
+UTL0240  DS    0H
+         MVC   DSAOGR1,XQESTPCP        grant specified seconds
+         MVC   DSAORC,=AL4(8)          indicate seconds
+         ZTRCE UTL=P,LINKAGE=LOCAL     trace
+*
+UTL0250  DS    0H
+         L     R2,EXTSTPXC             STEPCPU extension added count
+         LA    R2,1(,R2)               add one
+         ST    R2,EXTSTPXC             update count
+         ZTRCE UTL=Q,LINKAGE=LOCAL     trace
+*
+**       Issue time limit extension granted msg
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    UTLCOMM                 no, process common options
+         ZWTO  MID=ZEMF80W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3==CL8'Step CPU'       show step CPU time limit
+         B     UTLCOMM                 process common options
+*
+**       Process job WAIT time limit
+*
+UTL0300  DS    0H
+         MVC   DSAORC,=AL4(RC12)       cancel job RC
+         CLC   DSAGPR0,WAITLIM         WAIT time limit expired?
+         BNE   UTLEXIT                 no
+         TM    XQEUTLF1,XQE@WTME       WAITTIME=NOLIMIT specified?
+         BZ    UTL0310                 no
+         MVC   DSAOGR1,DSAJWTS         grant JWT() binary seconds
+         MVC   DSAORC,=AL4(8)          indicate seconds
+         ZTRCE UTL=R,LINKAGE=LOCAL     trace
+         B     UTL0350
+*
+UTL0310  DS    0H
+         ICM   R3,15,XQEWTIME          wait extensions allowed?
+         BNZ   UTL0320                 yes
+         OI    EXTFLG1,EXT@FREE        set free indicator
+         MVC   EXTFREE,=CL4'FREE'      mark it free
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   UTLCOMM                 yes, process common options
+         XC    EXTC(EXT@ZERO),EXTC     clear reused fields
+         ZTRCE UTL=S,LINKAGE=LOCAL     trace
+         B     UTLCOMM                 process common options
+*
+UTL0320  DS    0H
+         L     R3,EXTWAITC             get granted extensions
+         CL    R3,XQEWAITX             max extensions given?
+         BL    UTL0330                 no
+         OI    EXTFLG1,EXT@FREE        set freed indicator
+         MVC   EXTFREE,=CL4'FREE'      mark it free
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   UTL0325                 yes, skip clear
+         XC    EXTC(EXT@ZERO),EXTC     clear reused fields
+         ZTRCE UTL=T,LINKAGE=LOCAL     trace
+*
+**       Issue time limit exceeded msg
+*
+UTL0325  DS    0H
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    UTLCOMM                 no, process common options
+         ZWTO  MID=ZEMF81W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3==CL8'wait'           show CPU time limit
+         B     UTLCOMM                 process common options
+*
+UTL0330  DS    0H
+         MVC   DSAOGR1,XQEWTIME        grant specified seconds
+         MVC   DSAORC,=AL4(8)          indicate seconds
+         ZTRCE UTL=U,LINKAGE=LOCAL     trace
+*
+UTL0350  DS    0H
+         L     R2,EXTWAITC             WAITTIME extension added count
+         LA    R2,1(,R2)               add one
+         ST    R2,EXTWAITC             update count
+         ZTRCE UTL=V,LINKAGE=LOCAL     trace
+*
+**       Issue time limit extention granted msg
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    UTLCOMM                 no, process common options
+         ZWTO  MID=ZEMF80W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3==CL8'Wait'           show wait time limit
+*
+**       Process common exit options
+*
+UTLCOMM  DS    0H
+         TM    XQECOMF1,XQE@CMND       COMMAND= option specified?
+         BZ    UTLCO10                 no
+         ZCALL SR=COMMAND              issue specified command
+         ZTRCE UTL=W,LINKAGE=BRANCH    trace
+*
+UTLCO10  DS    0H
+         TM    XQECOMF1,XQE@SMFR       SMF=YES specified?
+         BZ    UTLEXIT                 no
+         ZCALL SR=SMFREC               write SMF record
+         ZTRCE UTL=X,LINKAGE=LOCAL     trace
+*
+**       Update exit in flight count
+*
+UTLEXIT  DS    0H
+         L     R2,ZEVTXACT             inflight count
+         LR    R3,R2                   copy count
+         BCTR  R3,0                    subtract one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   UTLEXIT                 changed: try again
+         ZTRCE UTL=Y,LINKAGE=LOCAL     trace
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+CPUJLIM  DC    F'0'                    job time limit expired
+CPUSLIM  DC    F'4'                    step time limit expired
+WAITLIM  DC    F'8'                    wait time limit expired
+CPUSECS  DC    F'&SECONDS'             default seconds
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFUSO                                              */
+*/*                                                                  */
+*/* Function:    SYSOUT limit SMF exit routine                       */
+*/*                                                                  */
+*/* Description: Receives control from the job entry subsystem       */
+*/*              when the number of records written to a SYSOUT      */
+*/*              output dataset exceeds the output limit.            */
+*/*                                                                  */
+*/* Attributes:  RB mode                                             */
+*/*              JES2: PSW key 0                                     */
+*/*              JES3: PSW key 1                                     */
+*/*              Supervisor state                                    */
+*/*                                                                  */
+*/* Input Regs:  R0  Not applicable                                  */
+*/*              R1  Parmlist address                                */
+*/*                  Word 1 - Common parameter are address           */
+*/*                                                                  */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  ZEXT address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 One of the following return codes:              */
+*/*                   4 - Continue processing the job. Increase      */
+*/*                       the output limit by the value specified    */
+*/*                       in register R1.                            */
+*/*                  12 - Job processing should be cancelled.        */
+*/*                                                                  */
+*/*               R0 Restored to contents at entry.                  */
+*/*                                                                  */
+*/*               R1 One of the following values:                    */
+*/*                  R15=4, R1 output limit increment value.         */
+*/*                  R15 not=4, R1 restored to contents at entry.    */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFUSO   ZMACS GEN=SUBENTY
+         USING ZEVT,R11
+         USING ZXQE,R8
+         USING ZRWA,R9
+*
+**       Set recovery retry address
+*
+         ZRETRY USOEXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=EMFUSO,             exit name                       +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN220)        RSN
+*
+**       Update listener entry count
+*
+         L     R2,ZEVTUSOC             listener count
+         LA    R2,1(,R2)               add one
+         $ST   R2,ZEVTUSOC             update count
+*
+**       Update exit in flight count
+*
+USO0000  DS    0H
+         SPKA  0(0)
+         L     R2,ZEVTXACT             inflight count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   USO0000+4               changed: try again
+         L     R2,DSAEKEY              caller key
+         SPKA  0(R2)                   restore key
+*
+**       Locate ZXQE element
+*
+         MVC   DSAORC,=AL4(RC12)       set cancel job RC
+         ICM   R8,15,ZEVTUSOQ          ZXQEs queued?
+         BNZ   USO0010                 yes
+         ZTRCE USO=A,LINKAGE=BRANCH    trace
+         B     USOEXIT                 exit
+*
+USO0010  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        valid?
+         BE    USO0020                 yes
+         ZTRCE USO=B,LINKAGE=BRANCH    trace
+         B     USOEXIT                 exit
+*
+USO0020  DS    0H
+         ZCALL SR=LOCZXQE
+         LTR   R15,R15                 ZXQE found?
+         BZ    USO0025                 yes
+         ZTRCE USO=C,LINKAGE=BRANCH    trace
+         B     USOEXIT                 exit
+*
+USO0025  DS    0H
+         L     R7,DSAZEXT              returned ZEXT
+         USING ZEXT,R7
+         L     R8,DSAZXQE              returned ZXQE
+         ZTRCE USO=D,LINKAGE=BRANCH    trace
+*
+**       Init maximum SYSOUT lines allowed
+*
+         XR    R2,R2
+         L     R3,XQEOUTXL             max extensions allowed
+         L     R0,XQEOUTSL             number of extensions given
+         MR    R2,R0                   total timer units
+         $ST   R3,EXTTOTSL             total SYSOUT lines allowed
+*
+**       Process SYSOUT output limit
+*
+         TM    XQEUXTF1,XQE@OUTL       SYSOUT=NOLIMIT specified?
+         BZ    USO0030                 no
+         MVC   DSAOGR1,=AL4(&SYSOUTL)  grant default extension
+         MVC   DSAORC,=AL4(4)          set granted RC
+         ZTRCE USO=E,LINKAGE=BRANCH    trace
+         B     USO0070
+*
+USO0030  DS    0H
+         ICM   R3,15,XQEOUTSL          SYSOUT extensions allowed?
+         BNZ   USO0040                 yes
+         $OI   EXTFLG1,EXT@FREE        set free indicator
+         $MVC  EXTFREE,=CL4'FREE'      mark it free
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   USOCOMM                 yes, process common options
+         $XC   EXTC(EXT@ZERO),EXTC     clear reused fields
+         ZTRCE USO=F,LINKAGE=BRANCH    trace
+         B     USOCOMM                 process common options
+*
+USO0040  DS    0H
+         L     R3,EXTOUTXC             get granted extensions
+         CL    R3,XQEOUTXL             max extensions given?
+         BL    USO0060                 no
+         $OI   EXTFLG1,EXT@FREE        set free indicator
+         $MVC  EXTFREE,=CL4'FREE'      mark it free
+         MVC   DSAWORD,EXTTOTSL        protect total lines
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   USO0050                 yes, skip clear
+         $XC   EXTC(EXT@ZERO),EXTC     clear reused fields
+         ZTRCE USO=G,LINKAGE=BRANCH    trace
+*
+**       Issue SYSOUT limit exceeded msg
+*
+USO0050  DS    0H
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    USOCOMM                 no, process common options
+         L     R3,DSAWORD              total increment lines
+         CVD   R3,DSADWRD              convert
+         MVC   DSAEDITM,ZEVTEDIT       copy EDit mask
+         ED    DSAEDITM,DSADWRD+4      edit SYSOUT lines
+         ZWTO  MID=ZEMF87W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3=DSAEDITM             show total SYSOUT lines granted
+         ZTRCE USO=H,LINKAGE=BRANCH    trace
+         B     USOCOMM                 process common options
+*
+USO0060  DS    0H
+         MVC   DSAOGR1,XQEOUTSL        grant specified SYSOUT lines
+         MVC   DSAORC,=AL4(4)          set granted RC
+         ZTRCE USO=I,LINKAGE=BRANCH    trace
+*
+USO0070  DS    0H
+         L     R2,EXTOUTXC             SYSOUT extension added count
+         LA    R2,1(,R2)               add one
+         $ST   R2,EXTOUTXC             update count
+         ZTRCE USO=J,LINKAGE=BRANCH    trace
+*
+**       Issue SYSOUT limit extention granted msg
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    USOCOMM                 no, process common options
+         L     R3,XQEOUTSL             SYSOUT increment lines
+         CVD   R3,DSADWRD              convert
+         MVC   DSAEDITM,ZEVTEDIT       copy EDit mask
+         ED    DSAEDITM,DSADWRD+4      edit SYSOUT increment lines
+         ZWTO  MID=ZEMF82W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3=DSAEDITM             show increment lines
+         ZTRCE USO=K,LINKAGE=BRANCH    trace
+*
+**       Process common exit options
+*
+USOCOMM  DS    0H
+         TM    XQECOMF1,XQE@CMND       COMMAND= option specified?
+         BZ    USOCO10                 no
+         ZCALL SR=COMMAND              issue specified command
+         ZTRCE USO=L,LINKAGE=BRANCH    trace
+*
+USOCO10  DS    0H
+         TM    XQECOMF1,XQE@SMFR       SMF=YES specified?
+         BZ    USOEXIT                 no
+         ZCALL SR=SMFREC               write SMF record
+         ZTRCE USO=M,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+USOEXIT  DS    0H
+         SPKA  0(0)                    supervisor key
+         L     R2,ZEVTXACT             inflight count
+         LR    R3,R2                   copy count
+         BCTR  R3,0                    subtract one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   USOEXIT+4               changed: try again
+         L     R2,DSAEKEY              caller key
+         SPKA  0(R2)                   restore key
+         ZTRCE USO=N,LINKAGE=BRANCH    trace
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU29                                              */
+*/*                                                                  */
+*/* Function:    SMF dump exit routine                               */
+*/*                                                                  */
+*/* Description: Receives control when the current recording data    */
+*/*              set cannot hold any more records. It's also invoked */
+*/*              when the SMF writer switched recording data sets    */
+*/*              as a result of the SWITCH SMF command. the exit     */
+*/*              is also invoked during SMF initialization for data  */
+*/*              sets that are not empty.                            */
+*/*                                                                  */
+*/* Resdincy:    The exit runs in the SMF address space which runs   */
+*/*              under the MSTR subsystem rather than JES2/3.        */
+*/*                                                                  */
+*/* Attributes:  RB mode                                             */
+*/*              PSW key 0                                           */
+*/*              Supervisor state                                    */
+*/*                                                                  */
+*/* Input Regs:  R0  Not applicable                                  */
+*/*              R1  Address of SMF data set                         */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usge:   R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*                  4 - Indicates that the dump message (IEE362A,   */
+*/*                      IEE362A, IEE362I, IEE391A or IEE392I is     */
+*/*                      is not to be issued.                        */
+*/*                  8 - The message is to be issued.                */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU29   ZMACS GEN=SUBENTY
+         USING ZEVT,R11
+         USING ZXQE,R8
+         USING ZRWA,R9
+*
+**       Set recovery retry address
+*
+         ZRETRY U29EXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=EMFU29,             exit name                       +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN228)        RSN
+*
+**       Update listener entry count
+*
+         L     R2,ZEVTU29C             listener count
+         LA    R2,1(,R2)               add one
+         ST    R2,ZEVTU29C             update count
+*
+**       Update exit in flight count
+*
+U290000  DS   0H
+         L     R2,ZEVTXACT             inflight count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U290000                 changed: try again
+*
+**       Locate ZXQE element
+*
+         MVC   DSAORC,=AL4(RC8)        Issue SMF message default
+         ICM   R8,15,ZEVTU29Q          ZXQE queued?
+         BNZ   U290005                 yes
+         ZTRCE U29=A,LINKAGE=BRANCH    trace
+         B     U29EXIT                 exit
+*
+U290005  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        valid?
+         BE    U290010                 yes
+         ZTRCE U29=B,LINKAGE=BRANCH    trace
+         B     U29EXIT                 exit
+*
+**       Check SMF dataset dump option
+*
+U290010  DS    0H
+         TM    XQEUXTF1,XQE@DMSG       DUMPMSG=YES?
+         BZ    U290020                 no
+         L     R2,DSAGPR1              parmlist
+         L     R2,0(,R2)               DSName address
+         MVC   DSADSNAM,0(R2)          copy DSName
+         MVC   DSAWORKA,=CL8'message'  indicate message issued
+         ZTRCE U29=C,LINKAGE=BRANCH    trace
+         B     U290099
+*
+U290020  DS    0H
+         TM    XQEUXTF1,XQE@DCMD       DUMPCMD=?
+         BZ    U29EXIT                 when the walls fell
+         MVC   DSAORC,=AL4(RC4)        set DONOT issue message RC
+         ZTRCE U29=D,LINKAGE=BRANCH    trace
+*
+**       Extract SMF dataset name
+*
+         L     R2,DSAGPR1              parmlist
+         L     R2,0(,R2)               DSName address
+         MVC   DSADSNAM,0(R2)          copy DSName
+         LA    R3,DSADSNAM             dataset name address
+         LA    R2,L'DSADSNAM           dataset name length
+*
+U290030  DS    0H
+         CLI   0(R3),BLANK             end of dataset name?
+         BE    U290040                 yes
+         LA    R3,1(,R3)               walk thru dataset name
+         BCT   R2,U290030              loop
+         ZTRCE U29=E,LINKAGE=BRANCH    trace
+*
+U290040  DS    0H
+         LA    R2,DSADSNAM             dataset name address
+         SR    R3,R2                   true length
+         STH   R3,DSADSNLN             save length
+         CH    R3,=H'44'               valid DSName length?
+         BNH   U290050                 yes
+         MVC   DSADSNLN,=H'44'         no
+         ZTRCE U29=F,LINKAGE=BRANCH    trace
+*
+U290050  DS    0H
+         MVC   DSAVDATA,ZEVTBLKS       clear
+         LA    R1,DSA@VDTL             max command length
+         LH    R2,XQE29CLN             command data length
+         CR    R2,R1                   length exceeded?
+         BNH   U290060                 no
+         LR    R2,R1                   truncate command length
+         ZTRCE U29=G,LINKAGE=BRANCH    trace
+*
+U290060  DS    0H
+         BCTR  R2,0
+         EX    R2,CPY29CMD             copy command data
+         LA    R3,DSAVDATA             command data address
+*
+U290070  DS    0H
+         CLC   =CL7'&&DSNAME',0(R3)    DSName variable?
+         BE    U290080                 yes
+         LA    R3,1(,R3)               walk thru command data
+         BCT   R2,U290070              loop
+         MVC   DSAVDATA,ZEVTBLKS       clear
+         MVC   DSAVDATA(L'XQE29CMD),XQE29CMD
+         ZTRCE U29=H,LINKAGE=BRANCH    trace
+         B     U290090                 issue command
+*
+U290080  DS    0H
+         LH    R2,DSADSNLN             dataset name length
+         BCTR  R2,0
+         EX    R2,CPY29DSN             copy dataset name
+         ZTRCE U29=I,LINKAGE=BRANCH    trace
+*
+**       Issue SMF dataset dump command
+*
+U290090  DS    0H
+         MVC   DSAPLST(CM29BTXL),CM29TXT
+         MVC   DSAPLST+4(CM29TXDL),DSAVDATA
+         XR    R0,R0                   console ID
+         MGCR  DSAPLST                 issue command
+         MVC   DSAWORKA,=CL8'command'  indicate commad issued
+         ZTRCE U29=J,LINKAGE=BRANCH    trace
+*
+**       Update processing count
+*
+U290099  DS    0H
+         L     R2,XQEU29CT             processing count
+         LA    R2,1(,R2)               add one
+         ST    R2,XQEU29CT             update count
+         ZTRCE U29=K,LINKAGE=BRANCH    trace
+*
+**       Issue warning WTO message
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES?
+         BZ    U29COMM                 no
+         ZWTO  MID=ZEMF89W,                                            +
+               V1=XQESUBID,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=XQEJOBNM,            show jobname                    +
+               V3=DSAWORKA,            show command/message            +
+               V4=DSADSNAM             show dataset name
+         ZTRCE U29=L,LINKAGE=BRANCH    trace
+*
+**       Process common exit options
+*
+U29COMM  DS    0H
+         TM    XQECOMF1,XQE@CMND       COMMAND= option specified?
+         BZ    U29CO10                 no
+         ZCALL SR=COMMAND              issue specified command
+         ZTRCE U29=M,LINKAGE=BRANCH    trace
+*
+U29CO10  DS    0H
+         TM    XQECOMF1,XQE@SMFR       SMF=YES specified?
+         BZ    U29EXIT                 no
+         ZCALL SR=SMFREC               write SMF record
+         ZTRCE U29=N,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U29EXIT  DS    0H
+         L     R2,ZEVTXACT             inflight count
+         LR    R3,R2                   copy count
+         BCTR  R3,0                    subtract one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U29EXIT                 changed: try again
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+CPY29DSN MVC   0(*-*,R3),DSADSNAM
+CPY29CMD MVC   DSAVDATA(*-*),XQE29CMD
+*---------------------------------------------------------------------*
+*        MGCR listform                                                *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+CM29TXT  DS    0XL80                   command buffer
+         DC    AL2(CM29BTXL)           -buffer length
+         DC    AL2(0)                  -buffer options
+CM29TXD  DC    CL76' '                 -command data
+CM29TXDL EQU   *-CM29TXD               -command length
+CM29BTXL EQU   *-CM29TXT               comman buffer length
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU29L                                             */
+*/*                                                                  */
+*/* Function:    SMF log stream dump exit routine                    */
+*/*                                                                  */
+*/* Description: Allows you to initiate the archiving of SMF data    */
+*/*              from a log stream. The exit is invoked using the    */
+*/*              SWITCH SMF command.                                 */
+*/*                                                                  */
+*/* Residency:   The exit runs in the SMF address space which runs   */
+*/*              under the MSTR subsystem rather than JES2/3.        */
+*/*                                                                  */
+*/* Attributes:  RB mode                                             */
+*/*              PSW key 0                                           */
+*/*              Supervisor state                                    */
+*/*                                                                  */
+*/* Input Regs:  R0  Not applicable                                  */
+*/*              R1  Address of a pointer to a parameter list        */
+*/*                  mapped by IFAU29LM.                             */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  U29L_PARM address                               */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Not applicable                                  */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU29L  ZMACS GEN=SUBENTY
+         USING ZEVT,R11
+         USING U29L_PARM,R7
+         USING ZXQE,R8
+         USING ZRWA,R9
+*
+**       Set recovery retry address
+*
+         ZRETRY U29LXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=EMFU29L,            exit name                       +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN232)        RSN
+*
+**       Update listener entry count
+*
+         L     R2,ZEVT29LC             listener count
+         LA    R2,1(,R2)               add one
+         ST    R2,ZEVT29LC             update count
+*
+**       Update exit in flight count
+*
+U29L000  DS   0H
+         L     R2,ZEVTXACT             inflight count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U29L000                 changed: try again
+*
+**       Locate ZXQE element
+*
+         MVC   DSAORC,=AL4(RC8)        Issue SMF message default
+         ICM   R8,15,ZEVT29LQ          ZXQE queued?
+         BNZ   U29L010                 yes
+         ZTRCE U9L=A,LINKAGE=BRANCH    trace
+         B     U29LXIT                 exit
+*
+U29L010  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        valid?
+         BE    U29L020                 yes
+         ZTRCE U9L=B,LINKAGE=BRANCH    trace
+         B     U29LXIT                 exit
+*
+U29L020  DS    0H
+         MVC   DSAORC,=AL4(RC8)        RC
+         TM    XQEUXTF1,XQE@DCMD       DUMPCMD=?
+         BZ    U29LXIT                 when the walls fell!
+         ZTRCE U9L=C,LINKAGE=BRANCH    trace
+*
+**       Extract log stream name
+*
+         L     R6,DSAGPR1              parmlist
+         L     R7,0(,R6)               U29L_PARM
+         USING U29L_PARM,R7
+*
+U29L030  DS    0H
+         LH    R2,U29L_LSNAME_LENGTH   log stream name length
+         STH   R2,DSADSNLN             save it
+         BCTR  R2,0
+         MVC   DSADSNAM,ZEVTBLKS       clear
+         EX    R2,CPY29LNM             copy log stream name
+         ZTRCE U9L=E,LINKAGE=BRANCH    trace
+*
+**       Build log stream dump command
+*
+         MVC   DSAVDATA,ZEVTBLKS       clear
+         LA    R1,DSA@VDTL             max command length
+         LH    R2,XQE29CLN             command data length
+         CR    R2,R1                   length exceeded?
+         BNH   U29L040                 no
+         LR    R2,R1                   truncate command length
+         ZTRCE U9L=F,LINKAGE=BRANCH    trace
+*
+U29L040  DS    0H
+         BCTR  R2,0
+         EX    R2,CPY29LCM             copy command data
+         LA    R3,DSAVDATA             command data address
+*
+U29L050  DS    0H
+         CLC   =CL7'&&DSNAME',0(R3)    DSName variable?
+         BE    U29L060                 yes
+         LA    R3,1(,R3)               walk thru command data
+         BCT   R2,U29L050              loop
+         MVC   DSAVDATA,ZEVTBLKS       clear
+         MVC   DSAVDATA(L'XQE29CMD),XQE29CMD
+         ZTRCE U9L=G,LINKAGE=BRANCH    trace
+         B     U29L070                 issue command
+*
+U29L060  DS    0H
+         LH    R2,DSADSNLN             dataset name length
+         BCTR  R2,0
+         EX    R2,CPY29LDS             copy dataset name
+         ZTRCE U9L=H,LINKAGE=BRANCH    trace
+*
+**       Issue log stream dump command
+*
+U29L070  DS    0H
+         MVC   DSAPLST(CM29LTXL),CM29LTXT
+         MVC   DSAPLST+4(CM29LXDL),DSAVDATA
+         XR    R0,R0                   console ID
+         MGCR  DSAPLST                 issue command
+         ZTRCE U9L=I,LINKAGE=BRANCH    trace
+*
+**       Update processing count
+*
+         L     R2,XQE29LCT             processing count
+         LA    R2,1(,R2)               add one
+         ST    R2,XQE29LCT             update count
+         ZTRCE U9L=J,LINKAGE=BRANCH    trace
+*
+**       Issue warning WTO message
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES?
+         BZ    U29L099                 no
+         ZWTO  MID=ZEMF89W,                                            +
+               V1=XQESUBID,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=XQEJOBNM,            show jobname                    +
+               V3==CL8'command',       show command/message            +
+               V4=DSADSNAM             show dataset name
+         ZTRCE U9L=K,LINKAGE=BRANCH    trace
+*
+U29L099  DS    0H
+         TM    0(R6),ENDVL             end of list?
+         BNZ   U29LCOM                 yes
+         LA    R6,4(,R6)               next U29L_PARM ptr
+         L     R7,0(,R6)               U29L_PARM?
+         ZTRCE U9L=L,LINKAGE=BRANCH    trace
+         B     U29L030                 loop
+*
+**       Process common exit options
+*
+U29LCOM  DS    0H
+         TM    XQECOMF1,XQE@CMND       COMMAND= option specified?
+         BZ    U29LXIT                 no
+         ZCALL SR=COMMAND              issue specified command
+         ZTRCE U9L=M,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U29LXIT  DS    0H
+         L     R2,ZEVTXACT             inflight count
+         LR    R3,R2                   copy count
+         BCTR  R3,0                    subtract one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U29LXIT                 changed: try again
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        EXecuted instructions                                        *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+CPY29LDS MVC   0(*-*,R3),DSADSNAM
+CPY29LCM MVC   DSAVDATA(*-*),XQE29CMD
+CPY29LNM MVC   DSADSNAM(*-*),U29L_LSNAME
+*---------------------------------------------------------------------*
+*        MGCR listform                                                *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+CM29LTXT DS    0XL80                   command buffer
+         DC    AL2(CM29LTXL)           -buffer length
+         DC    AL2(0)                  -buffer options
+CM29LXD  DC    CL76' '                 -command data
+CM29LXDL EQU   *-CM29LXD               -command length
+CM29LTXL EQU   *-CM29LTXT              comman buffer length
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU83                                              */
+*/*                                                                  */
+*/* Function:    SMF record exit routine                             */
+*/*                                                                  */
+*/* Description: Receives control only when SMF is processing        */
+*/*              a record that contains a standard header.           */
+*/*                                                                  */
+*/* Residency:   Receives control in the address space of the        */
+*/*              program that invoked the SMFWTM/SMFEWTM with        */
+*/*              BRANCH=NO.                                          */
+*/*                                                                  */
+*/*              TCB mode                                            */
+*/*              PSW key 0                                           */
+*/*              Supervisor state                                    */
+*/*              Caller address space                                */
+*/*                                                                  */
+*/* Input Regs:  R0  Not applicable                                  */
+*/*              R1  Parameter address                               */
+*/*                  Word 1 - SMF record address                     */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  JMR  address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*                  0 - WRITE the SMF record                        */
+*/*                  4 - DONOT write the SMF record                  */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU83   ZMACS GEN=SUBENTY
+         USING ZEVT,R11
+         USING ZXQE,R8
+         USING ZRWA,R9
+*
+**       Set recovery retry address
+*
+         ZRETRY U83EXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=EMFU83,             exit name                       +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN212)        RSN
+         ZTRCE U83=A,LINKAGE=BRANCH    trace
+*
+**       Update listener entry count
+*
+         L     R2,ZEVTU83C             listener count
+         LA    R2,1(,R2)               add one
+         ST    R2,ZEVTU83C             update count
+         ZTRCE U83=B,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U830000  DS   0H
+         L     R2,ZEVTXACT             inflight count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U830000                 changed: try again
+*
+**       Retrieve SMF record type
+*
+         L     R3,DSAGPR1              parmlist
+         L     R3,0(,R3)               SMF record address
+         IFAHDR REQUEST=GETINFO,                                       +
+               RECPTR=(R3),TYPE=DSARTYPE
+         LH    R1,DSARTYPE             returned record type
+         ST    R1,DSASMFTP             save record type
+         ZTRCE U83=C,LINKAGE=BRANCH    trace
+*
+**       Locate ZXQE element
+*
+         MVC   DSAORC,=AL4(RC0)        DONOT suppress default
+         ICM   R8,15,ZEVTU83Q          ZXQEs queued?
+         BNZ   U830010                 yes
+         ZTRCE U83=D,LINKAGE=BRANCH    trace
+         B     U83EXIT                 exit
+*
+U830010  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        valid?
+         BE    U830020                 yes
+         ZTRCE U83=E,LINKAGE=BRANCH    trace
+         B     U83EXIT                 exit
+*
+U830020  DS    0H
+         ZCALL SR=LOCZXQE
+         LTR   R15,R15                 ZXQE found?
+         BZ    U830030                 yes
+         ZTRCE U83=F,LINKAGE=BRANCH    trace
+         B     U83EXIT                 exit
+*
+**       Process suppress specification
+*
+U830030  DS    0H
+         L     R8,DSAZXQE              returned ZXQE
+         ZTRCE U83=G,LINKAGE=BRANCH    trace
+         MVC   DSAORC,=AL4(RC0)        set DONOT suppress
+         TM    XQEUXTF1,XQE@U8XW       SUPPRESS=NO?
+         BNZ   U830099                 yes
+         LH    R2,XQE8XCNT             record count
+         LA    R3,XQE8XSMF             record list address
+         ZTRCE U83=H,LINKAGE=BRANCH    trace
+*
+U830040  DS    0H
+         CLC   DSARTYPE,0(R3)          record type match?
+         BE    U830050                 yes, suppress it
+         LA    R3,2(,R3)               next record slot
+         BCT   R2,U830040              loop
+         MVC   DSAORC,=AL4(RC0)        set DONOT suppress
+         ZTRCE U83=I,LINKAGE=BRANCH    trace
+         B     U830099
+*
+U830050  DS    0H
+         MVC   DSAORC,=AL4(RC4)        suppress record
+         ZTRCE U83=J,LINKAGE=BRANCH    trace
+*
+**       Increment processing count
+*
+U830099  DS    0H
+         L     R2,XQEU8XCT             processing count
+         LA    R2,1(,R2)               add one
+         ST    R2,XQEU8XCT             update count
+         ZTRCE U83=K,LINKAGE=BRANCH    trace
+*
+**       Issue warning WTO message
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    U83COMM                 no, process common options
+         ZWTO  MID=ZEMF83W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3=DSASMFTP             show record type
+         ZTRCE U83=L,LINKAGE=BRANCH    trace
+*
+**       Process common exit options
+*
+U83COMM  DS    0H
+         TM    XQECOMF1,XQE@CMND       COMMAND= option specified?
+         BZ    U83EXIT                 no
+         ZCALL SR=COMMAND              issue specified command
+         ZTRCE U83=M,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U83EXIT  DS    0H
+         L     R2,ZEVTXACT             inflight count
+         LR    R3,R2                   copy count
+         BCTR  R3,0                    subtract one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U83EXIT                 changed: try again
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU84                                              */
+*/*                                                                  */
+*/* Function:    SMF record exit routine                             */
+*/*                                                                  */
+*/* Description: Receives control only when SMF is processing        */
+*/*              a record that contains a standard header.           */
+*/*                                                                  */
+*/* Residency:   Receives control in the address space of the        */
+*/*              program that invoked the SMFEWTM with BRANCH=YES.   */
+*/*              service.                                            */
+*/*                                                                  */
+*/*              TCB mode                                            */
+*/*              SRB mode                                            */
+*/*              PSW key 0                                           */
+*/*              Supervisor state                                    */
+*/*              Caller address space                                */
+*/*                                                                  */
+*/* Input Regs:  R0  Not applicable                                  */
+*/*              R1  Parameter address                               */
+*/*                  Word 1 - SMF record address                     */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  JMR  address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*                  0 - WRITE the SMF record                        */
+*/*                  4 - DONOT write the SMF record                  */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU84   ZMACS GEN=SUBENTY
+         USING ZEVT,R11
+         USING ZXQE,R8
+         USING ZRWA,R9
+*
+**       Set recovery retry address
+*
+         ZRETRY U84EXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=EMFU84,             exit name                       +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN236)        RSN
+         ZTRCE U84=A,LINKAGE=BRANCH    trace
+*
+**       Update listener entry count
+*
+         L     R2,ZEVTU84C             listener count
+         LA    R2,1(,R2)               add one
+         ST    R2,ZEVTU84C             update count
+         ZTRCE U84=B,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U840000  DS   0H
+         L     R2,ZEVTXACT             inflight count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U840000                 changed: try again
+*
+**       Retrieve SMF record type
+*
+         L     R3,DSAGPR1              parmlist
+         L     R3,0(,R3)               SMF record address
+         IFAHDR REQUEST=GETINFO,                                       +
+               RECPTR=(R3),TYPE=DSARTYPE
+         LH    R1,DSARTYPE             returned record type
+         ST    R1,DSASMFTP             save record type
+         ZTRCE U84=C,LINKAGE=BRANCH    trace
+*
+**       Locate ZXQE element
+*
+         MVC   DSAORC,=AL4(RC0)        DONOT suppress default
+         ICM   R8,15,ZEVTU84Q          ZXQEs queued?
+         BNZ   U840010                 yes
+         ZTRCE U84=D,LINKAGE=BRANCH    trace
+         B     U84EXIT                 exit
+*
+U840010  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        valid?
+         BE    U840020                 yes
+         ZTRCE U84=E,LINKAGE=BRANCH    trace
+         B     U84EXIT                 exit
+*
+U840020  DS    0H
+         ZCALL SR=LOCZXQE
+         LTR   R15,R15                 ZXQE found?
+         BZ    U840030                 yes
+         ZTRCE U84=F,LINKAGE=BRANCH    trace
+         B     U84EXIT                 exit
+*
+**       Process suppress specification
+*
+U840030  DS    0H
+         L     R8,DSAZXQE              returned ZXQE
+         ZTRCE U84=G,LINKAGE=BRANCH    trace
+         MVC   DSAORC,=AL4(RC0)        set DONOT suppress
+         TM    XQEUXTF1,XQE@U8XW       SUPPRESS=NO?
+         BNZ   U840099                 yes
+         LH    R2,XQE8XCNT             record count
+         LA    R3,XQE8XSMF             record list address
+         ZTRCE U84=H,LINKAGE=BRANCH    trace
+*
+U840040  DS    0H
+         CLC   DSARTYPE,0(R3)          record type match?
+         BE    U840050                 yes, suppress it
+         LA    R3,2(,R3)               next record slot
+         BCT   R2,U840040              loop
+         MVC   DSAORC,=AL4(RC0)        set DONOT suppress
+         ZTRCE U84=I,LINKAGE=BRANCH    trace
+         B     U840099
+*
+U840050  DS    0H
+         MVC   DSAORC,=AL4(RC4)        suppress record
+         ZTRCE U84=J,LINKAGE=BRANCH    trace
+*
+**       Increment processing count
+*
+U840099  DS    0H
+         L     R2,XQEU8XCT             processing count
+         LA    R2,1(,R2)               add one
+         ST    R2,XQEU8XCT             update count
+         ZTRCE U84=K,LINKAGE=BRANCH    trace
+*
+**       Issue warning WTO message
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    U84EXIT                 no, exit
+         ZWTO  MID=ZEMF84W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3=DSASMFTP             show record type
+         ZTRCE U84=L,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U84EXIT  DS    0H
+         L     R2,ZEVTXACT             inflight count
+         LR    R3,R2                   copy count
+         BCTR  R3,0                    subtract one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U84EXIT                 changed: try again
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU85                                              */
+*/*                                                                  */
+*/* Function:    SMF record exit routine                             */
+*/*                                                                  */
+*/* Description: Receives control only when SMF is processing        */
+*/*              a record that contains a standard header.           */
+*/*                                                                  */
+*/* Residency:   Receives control in the address space that issues   */
+*/*              the SMFEWTM BRANCH=YES,MODE=XMEM service.           */
+*/*                                                                  */
+*/*              TCB mode                                            */
+*/*              PSW key 0                                           */
+*/*              Supervisor state                                    */
+*/*              Caller address space                                */
+*/*              Cross memory mode                                   */
+*/*              Can be holding the local lock                       */
+*/*                                                                  */
+*/* Input Regs:  R0  Not applicable                                  */
+*/*              R1  Parameter address                               */
+*/*                  Word 1 - SMF record address                     */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  JMR  address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*                  0 - WRITE the SMF record                        */
+*/*                  4 - DONOT write the SMF record                  */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU85   ZMACS GEN=SUBENTY
+         USING ZEVT,R11
+         USING ZXQE,R8
+         USING ZRWA,R9
+*
+**       Set recovery retry address
+*
+         ZRETRY U85EXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=EMFU85,             exit name                       +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN240)        RSN
+         ZTRCE U85=A,LINKAGE=BRANCH    trace
+*
+**       Update listener entry count
+*
+         L     R2,ZEVTU85C             listener count
+         LA    R2,1(,R2)               add one
+         ST    R2,ZEVTU85C             update count
+         ZTRCE U85=B,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U850000  DS   0H
+         L     R2,ZEVTXACT             inflight count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U850000                 changed: try again
+*
+**       Retrieve SMF record type
+*
+         L     R3,DSAGPR1              parmlist
+         L     R3,0(,R3)               SMF record address
+         IFAHDR REQUEST=GETINFO,                                       +
+               RECPTR=(R3),TYPE=DSARTYPE
+         LH    R1,DSARTYPE             returned record type
+         ST    R1,DSASMFTP             save record type
+         ZTRCE U85=C,LINKAGE=BRANCH    trace
+*
+**       Locate ZXQE element
+*
+         MVC   DSAORC,=AL4(RC0)        DONOT suppress default
+         ICM   R8,15,ZEVTU85Q          ZXQEs queued?
+         BNZ   U850010                 yes
+         ZTRCE U85=D,LINKAGE=BRANCH    trace
+         B     U85EXIT                 exit
+*
+U850010  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        valid?
+         BE    U850020                 yes
+         ZTRCE U85=E,LINKAGE=BRANCH    trace
+         B     U85EXIT                 exit
+*
+U850020  DS    0H
+         ZCALL SR=LOCZXQE
+         LTR   R15,R15                 ZXQE found?
+         BZ    U850030                 yes
+         ZTRCE U85=F,LINKAGE=BRANCH    trace
+         B     U85EXIT                 exit
+*
+**       Process suppress specification
+*
+U850030  DS    0H
+         L     R8,DSAZXQE              returned ZXQE
+         ZTRCE U85=G,LINKAGE=BRANCH    trace
+         MVC   DSAORC,=AL4(RC0)        set DONOT suppress
+         TM    XQEUXTF1,XQE@U8XW       SUPPRESS=NO?
+         BNZ   U850099                 yes
+         LH    R2,XQE8XCNT             record count
+         LA    R3,XQE8XSMF             record list address
+         ZTRCE U85=H,LINKAGE=BRANCH    trace
+*
+U850040  DS    0H
+         CLC   DSARTYPE,0(R3)          record type match?
+         BE    U850050                 yes, suppress it
+         LA    R3,2(,R3)               next record slot
+         BCT   R2,U850040              loop
+         MVC   DSAORC,=AL4(RC0)        set DONOT suppress
+         ZTRCE U85=I,LINKAGE=BRANCH    trace
+         B     U850099
+*
+U850050  DS    0H
+         MVC   DSAORC,=AL4(RC4)        suppress record
+         ZTRCE U85=J,LINKAGE=BRANCH    trace
+*
+**       Increment processing count
+*
+U850099  DS    0H
+         L     R2,XQEU8XCT             processing count
+         LA    R2,1(,R2)               add one
+         ST    R2,XQEU8XCT             update count
+         ZTRCE U85=K,LINKAGE=BRANCH    trace
+*
+**       Issue warning WTO message
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    U85EXIT                 no, exit
+         ZWTO  MID=ZEMF85W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3=DSASMFTP             show record type
+         ZTRCE U85=L,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U85EXIT  DS    0H
+         L     R2,ZEVTXACT             inflight count
+         LR    R3,R2                   copy count
+         BCTR  R3,0                    subtract one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U85EXIT                 changed: try again
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFU86                                              */
+*/*                                                                  */
+*/* Function:    SMF record exit routine                             */
+*/*                                                                  */
+*/* Description: Receives control for SMF records with either        */
+*/*              standard or extended headers.                       */
+*/*                                                                  */
+*/* Residency:   Receives control in the address space that          */
+*/*              issues the SMFEWTM or SMFEWTM service.              */
+*/*                                                                  */
+*/*              TCB mode                                            */
+*/*              SRB mode                                            */
+*/*              PSW key 0                                           */
+*/*              Supervisor state                                    */
+*/*              Caller address space                                */
+*/*              Can be holding the local lock                       */
+*/*              Can be invoked in cross memory mode                 */
+*/*                                                                  */
+*/* Input Regs:  R0  Not applicable                                  */
+*/*              R1  Parameter address                               */
+*/*                  Word 1 - SMF record address                     */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R6  SMXP address                                    */
+*/*              R7  JMR  address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*                  0 - WRITE the SMF record                        */
+*/*                  4 - DONOT write the SMF record                  */
+*/*                                                                  */
+*/* Note:        If multiple IEFU86 exits are called, or if IEFU83,  */
+*/*              IEFU84, or IEFU85 exits are called, SMF accepts any */
+*/*              of the exits that set a return code of 4.           */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFU86   ZMACS GEN=SUBENTY
+         USING ZEVT,R11
+         USING ZXQE,R8
+         USING ZRWA,R9
+*
+**       Set recovery retry address
+*
+         ZRETRY U86EXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=EMFU86,             exit name                       +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN216)        RSN
+         ZTRCE U86=A,LINKAGE=BRANCH    trace
+*
+**       Update listener entry count
+*
+         L     R2,ZEVTU86C             listener count
+         LA    R2,1(,R2)               add one
+         ST    R2,ZEVTU86C             update count
+         ZTRCE U86=B,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U860000  DS   0H
+         L     R2,ZEVTXACT             inflight count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U860000                 changed: try again
+*
+**       Retrieve SMF record type
+*
+         L     R6,DSAGPR1              parmlist
+         USING SMFEXITP,R6
+         CLC   SMXP_EYECATCHER,=CL4'SMXP'
+         BE    U860005                 found it
+         L     R6,0(,R6)               try it this way
+         CLC   SMXP_EYECATCHER,=CL4'SMXP'
+         BE    U860005                 found it
+         MVC   DSAORC,=AL4(RC0)        yikes! set DONOT suppress
+         ZTRCE U86=C,LINKAGE=BRANCH    trace
+         B     U86EXIT                 exit
+*
+U860005  DS    0H
+         L     R3,SMXP_RECPTR          SMF record pointer
+         IFAHDR REQUEST=GETINFO,                                       +
+               RECPTR=(R3),TYPE=DSARTYPE
+         LH    R1,DSARTYPE             returned record type
+         ST    R1,DSASMFTP             save record type
+         ZTRCE U86=D,LINKAGE=BRANCH    trace
+*
+**       Locate ZXQE element
+*
+         MVC   DSAORC,=AL4(RC0)        DONOT suppress default
+         ICM   R8,15,ZEVTU86Q          ZXQEs queued?
+         BNZ   U860010                 yes
+         ZTRCE U86=E,LINKAGE=BRANCH    trace
+         B     U86EXIT                 exit
+*
+U860010  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        valid?
+         BE    U860020                 yes
+         ZTRCE U86=F,LINKAGE=BRANCH    trace
+         B     U86EXIT                 exit
+*
+U860020  DS    0H
+         ZCALL SR=LOCZXQE
+         LTR   R15,R15                 ZXQE found?
+         BZ    U860030                 yes
+         ZTRCE U86=G,LINKAGE=BRANCH    trace
+         B     U86EXIT                 exit
+*
+**       Process suppress specification
+*
+U860030  DS    0H
+         L     R8,DSAZXQE              returned ZXQE
+         ZTRCE U86=H,LINKAGE=BRANCH    trace
+         MVC   DSAORC,=AL4(RC0)        set DONOT suppress
+         TM    XQEUXTF1,XQE@U8XW       SUPPRESS=NO?
+         BNZ   U860099                 yes
+         LH    R2,XQE8XCNT             record count
+         LA    R3,XQE8XSMF             record list address
+         ZTRCE U86=I,LINKAGE=BRANCH    trace
+*
+U860040  DS    0H
+         CLC   DSARTYPE,0(R3)          record type match?
+         BE    U860050                 yes, suppress it
+         LA    R3,2(,R3)               next record slot
+         BCT   R2,U860040              loop
+         MVC   DSAORC,=AL4(RC0)        set DONOT suppress
+         ZTRCE U86=J,LINKAGE=BRANCH    trace
+         B     U860099
+*
+U860050  DS    0H
+         MVC   DSAORC,=AL4(RC4)        suppress record
+         ZTRCE U86=K,LINKAGE=BRANCH    trace
+*
+**       Increment processing count
+*
+U860099  DS    0H
+         L     R2,XQEU8XCT             processing count
+         LA    R2,1(,R2)               add one
+         ST    R2,XQEU8XCT             update count
+         ZTRCE U86=L,LINKAGE=BRANCH    trace
+*
+**       Issue warning WTO message
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    U86EXIT                 no, exit
+         ZWTO  MID=ZEMF86W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3=DSASMFTP             show record type
+         ZTRCE U86=M,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+U86EXIT  DS    0H
+         L     R2,ZEVTXACT             inflight count
+         LR    R3,R2                   copy count
+         BCTR  R3,0                    subtract one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   U86EXIT                 changed: try again
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        IEFUJP                                              */
+*/*                                                                  */
+*/* Function:    Job purge SMF exit routine                          */
+*/*                                                                  */
+*/* Description: Receives control from the job entry subsystem JES2  */
+*/*              or JES3 when a job is ready to be purged form the   */
+*/*              system.                                             */
+*/*                                                                  */
+*/* Attributes:  RB mode                                             */
+*/*              PSW key 1                                           */
+*/*              Supervisor state                                    */
+*/*                                                                  */
+*/* Input Regs:  R0  Not applicable                                  */
+*/*              R1  Address of parameter list                       */
+*/*                  Word 1 - Address of common exit parameter area  */
+*/*                  Word 2 - Address of SMF job purge record (type  */
+*/*                           26) to be written to the SMF data set. */
+*/*                                                                  */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*                  4 - Job purge record is NOT to be written       */
+*/*                      to the SMF data set.                        */
+*/*                  8 - Job purge record is to be written to the    */
+*/*                      SMF dataset.                                */
+*/*                                                                  */
+*/*              R0-R14 Restored to contents at entry.               */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+IEFUJP   ZMACS GEN=SUBENTY
+         USING ZEVT,R11
+         USING ZXQE,R8
+         USING ZRWA,R9
+*
+**       Set recovery retry address
+*
+         ZRETRY UJPEXIT,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=EMFUJP,             exit name                       +
+               WTO=YES,                issue error msg                 +
+               DUMP=YES,               take SVC dump                   +
+               LOGREC=YES,             need LOGREC record              +
+               RSN==AL4(RSN224)        RSN
+*
+**       Update listener entry count
+*
+         L     R2,ZEVTUJPC             listener count
+         LA    R2,1(,R2)               add one
+         $ST   R2,ZEVTUJPC             update count
+*
+**       Update exit in flight count
+*
+UJP0000  DS   0H
+         SPKA  0(0)
+         L     R2,ZEVTXACT             inflight count
+         LA    R3,1(,R2)               add one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   UJP0000+4               changed: try again
+         L     R2,DSAEKEY              caller key
+         SPKA  0(R2)                   restore key
+*
+**       Locate ZXQE element
+*
+         MVC   DSAORC,=AL4(RC8)        write SMF record default
+         ICM   R8,15,ZEVTUJPQ          ZXQEs queued?
+         BNZ   UJP0010                 yes
+         ZTRCE UJP=A,LINKAGE=BRANCH    trace
+         B     UJPEXIT                 exit
+*
+UJP0010  DS    0H
+         CLC   XQEID,=CL4'ZXQE'        valid?
+         BE    UJP0020                 yes
+         ZTRCE UJP=B,LINKAGE=BRANCH    trace
+         B     UJPEXIT                 exit
+*
+UJP0020  DS    0H
+         ZCALL SR=LOCZXQE
+         LTR   R15,R15                 ZXQE found?
+         BZ    UJP0025                 yes
+         ZTRCE UJP=C,LINKAGE=BRANCH    trace
+         B     UJPEXIT                 exit
+*
+UJP0025  DS    0H
+         L     R8,DSAZXQE              returned ZXQE
+         ZTRCE UJP=D,LINKAGE=BRANCH    trace
+*
+**       Process purge record specification
+*
+         MVC   DSAORC,=AL4(RC4)        DONOT write SMF record
+         MVC   DSAWORKA,=CL8'purged'   not written to SMF
+         TM    XQEUXTF1,XQE@UJPR       PURGE=YES?
+         BNZ   UJP0030                 yes
+         MVC   DSAORC,=AL4(RC8)        write SMF record
+         MVC   DSAWORKA,=CL8'archived' written to SMF
+         ZTRCE UJP=E,LINKAGE=BRANCH    trace
+*
+**       Increment processing count
+*
+UJP0030  DS    0H
+         L     R2,XQEUJPCT             processing count
+         LA    R2,1(,R2)               add one
+         $ST   R2,XQEUJPCT             update count
+         ZTRCE UJP=F,LINKAGE=BRANCH    trace
+*
+**       Issue warning WTO message
+*
+         TM    XQECOMF1,XQE@WARN       WARNWTO=YES specified?
+         BZ    UJPCOMM                 no, process common options
+         ZWTO  MID=ZEMF88W,                                            +
+               V1=DSAASTYP,            show {JOB|SRC|TSO|OMVS|ASCH}    +
+               V2=DSAJOBNM,            show jobname                    +
+               V3=DSAWORKA             show record purge status
+         ZTRCE UJP=G,LINKAGE=BRANCH    trace
+*
+**       Process common exit options
+*
+UJPCOMM  DS    0H
+         TM    XQECOMF1,XQE@CMND       COMMAND= option specified?
+         BZ    UJPEXIT                 no
+         ZCALL SR=COMMAND              issue specified command
+         ZTRCE UJP=H,LINKAGE=BRANCH    trace
+*
+**       Update exit in flight count
+*
+UJPEXIT  DS    0H
+         SPKA  0(0)
+         L     R2,ZEVTXACT             inflight count
+         LR    R3,R2                   copy count
+         BCTR  R3,0                    subtract one
+         CS    R2,R3,ZEVTXACT          update count
+         BNE   UJPEXIT+4               changed: try again
+         L     R2,DSAEKEY              caller key
+         SPKA  0(R2)                   restore key
+         ZTRCE UJP=I,LINKAGE=BRANCH    trace
+         ZMACS GEN=SUBEXIT             exit
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        LOCJMR                                              */
+*/*                                                                  */
+*/* Function:    Locate JMR nested subroutine                        */
+*/*                                                                  */
+*/* Description: This routine locates the Job Management Record.     */
+*/*                                                                  */
+*/* Attributes:  TCB mode                                            */
+*/*              PSW key 0                                           */
+*/*              Supervisor state                                    */
+*/*                                                                  */
+*/* Input Regs:  R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+LOCJMR   ZMACS GEN=SUBENTY,SUBSAVE=DSANSSA
+         USING ZRWA,R9
+         USING ZEVT,R11
+*
+**       Locate JMR
+*
+         XR    R2,R2                   mi piace pulito
+         IPK   ,
+         ST    R2,DSACKEY              caller key
+         USING PSA,0
+         ICM   R4,15,PSATOLD           TCB-mode?
+         BZ    LOCJM20                 no
+         USING TCB,R4
+         XR    R5,R5
+         ICM   R5,7,TCBTCTB            TCT?
+         BNZ   LOCJM00                 yes
+         ZTRCE JMR=A,LINKAGE=BRANCH    trace
+         B     LOCJM20
+*
+LOCJM00  DS    0H
+         USING SMFTCT,R5
+         ICM   R5,15,TCTJMR            JMR?
+         BNZ   LOCJM10                 yes
+         ZTRCE JMR=B,LINKAGE=BRANCH    trace
+         B     LOCJM20
+*
+LOCJM10  DS    0H
+         USING JMR,R5
+         ZTRCE JMR=C,LINKAGE=BRANCH    trace
+         XR    R1,R1
+         IC    R1,JMRSTEP              step number
+         ST    R1,DSASTEP              save it
+         MVC   DSAJOBNM,JMRJOB         copy jobname
+         ZTRCE JMR=D,LINKAGE=BRANCH    trace
+         XC    DSARC,DSARC             RC
+         B     LOCJMXIT                exit
+*
+**       Serialize address space
+*
+LOCJM20  DS    0H
+         SPKA  0(0)                    supervisor key
+         ZCALL SRV=ZEVTLCLG            get LOCAL lock
+         ZTRCE JMR=E,LINKAGE=BRANCH    trace
+*
+**       Scan TCB chain
+*
+         L     R7,PSAAOLD              ASCB
+         USING ASCB,R7
+         L     R7,ASCBASXB             ASXB
+         USING ASXB,R7
+         L     R4,ASXBFTCB             TCB
+         ZTRCE JMR=F,LINKAGE=BRANCH    trace
+*
+LOCJM30  DS    0H
+         ICM   R5,7,TCBTCTB            TCT?
+         BZ    LOCJM40                 no
+         USING SMFTCT,R5
+         ICM   R5,15,TCTJMR            JMR?
+         BZ    LOCJM40                 no
+         USING JMR,R5
+         XR    R1,R1
+         IC    R1,JMRSTEP              step number
+         ST    R1,DSASTEP              save it
+         MVC   DSAJOBNM,JMRJOB         copy jobname
+         XC    DSARC,DSARC             RC
+         ZTRCE JMR=G,LINKAGE=BRANCH    trace
+         B     LOCJM99                 exit
+*
+LOCJM40  DS    0H
+         ICM   R4,15,TCBTCB            next TCB
+         BNZ   LOCJM30                 loop
+         MVC   DSARC,=AL4(RC8)         RC
+         ZTRCE JMR=H,LINKAGE=BRANCH    trace
+*
+**       Release address space serialization
+*
+LOCJM99  DS    0H
+         ZCALL SRV=ZEVTLCLF            free LOCAL lock
+         ZTRCE JMR=I,LINKAGE=BRANCH    trace
+*
+LOCJMXIT DS    0H
+         L     R2,DSACKEY              caller key
+         SPKA  0(R2)                   restore key
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAZPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        LOCZXQE                                             */
+*/*                                                                  */
+*/* Function:    Locate ZXQE element nested subroutine               */
+*/*                                                                  */
+*/* Input Regs:  R8  ZXQE queue address                              */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  ZEXT address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+LOCZXQE  ZMACS GEN=SUBENTY,SUBSAVE=DSANSSA
+         USING ZEXT,R7
+         USING ZXQE,R8
+         USING ZRWA,R9
+         USING ZEVT,R11
+*
+**       Scan ZXQE element queue
+*
+         XC    DSAZEXT,DSAZEXT         zero ZEXT
+         XC    DSAZXQE,DSAZXQE         zero ZXQE
+*
+LOCZ000  DS    0H
+         TM    XQEFLG1,XQE@XDIS        ZXQE disabled?
+         BNZ   LOCZ099                 yes, next ZXQE
+         TM    XQESTATE,XQE@ACTV       exit active?
+*@02D    BZ    LOCZ099                 no, next ZXQE               @02D
+         L     R3,=V(KEYTAB)           subsystem IDs table
+         USING XKEY,R3
+         MVC   DSAASTYP,ZEVTBLKS       scurb address space ID type
+         ZTRCE LOC=A,LINKAGE=BRANCH    trace
+*
+LOCZ010  DS    0H
+         CLC   XKEYSUBN,DSASUBNM       {JES2/3|TSO|STC|OMVS|ASCH}?
+         BE    LOCZ020                 yes
+         LA    R3,XKEY@SZE(,R3)        get next entry
+         CLC   =AL4(-1),0(R3)          last entry?
+         BNE   LOCZ010                 no, loop
+*@02D    ZCALL SR=ASTYPE               locate target address space @02D
+         ZCALL SR=LOCJOB               locate target address space @02A
+         ZTRCE LOC=B,LINKAGE=BRANCH    trace
+         B     LOCZ030
+*
+LOCZ020  DS    0H
+         XR    R1,R1
+         IC    R1,XKEYSUBL             address space type ID size
+         BCTR  R1,0
+         EX    R1,LOCZCOPY             copy address space type
+         ZTRCE LOC=C,LINKAGE=BRANCH    trace
+*
+LOCZ030  DS    0H
+         CLC   XQESUBID,DSAASTYP       subsystem match?
+         BNE   LOCZ099                 no, next ZXQE
+         ZTRCE LOC=D,LINKAGE=BRANCH    trace
+*
+**       Find matching jobname ZXQE
+*
+         CLC   XQEJOBNM,DSAJOBNM       jobname match?
+         BNE   LOCZ040                 no
+         ICM   R7,15,XQEZEXTP          ZEXT?
+         BNZ   LOCZ999                 yes
+         TM    XQECOMF1,XQE@EXTZ       ZEXT required?
+         BNZ   LOCZ999                 no
+         MVC   DSARC,=AL4(RC8)         RC
+         ZTRCE LOC=E,LINKAGE=BRANCH    trace
+         B     LOCZXIT                 exit
+*
+LOCZ040  DS    0H
+         ZCALL SR=JOBPAR               parse jobname
+         LTR   R15,R15                 generic jobname match?
+         BNZ   LOCZ099                 no, next ZXQE
+         TM    XQECOMF1,XQE@EXTZ       ZEXT required?
+         BNZ   LOCZ999                 no
+         ICM   R7,15,XQEZEXTP          queued ZEXTs?
+         BZ    LOCZ070                 no
+         ZTRCE LOC=F,LINKAGE=BRANCH    trace
+*
+**       Find matching jobname ZEXT
+*
+LOCZ050  DS    0H
+         TM    EXTFLG1,EXT@FREE        free ZEXT entry?
+         BNZ   LOCZ060                 yes, skip it
+         CLC   EXTJOBNM,DSAJOBNM       jobname match?
+         BE    LOCZ999                 yes
+         ZTRCE LOC=G,LINKAGE=BRANCH    trace
+*
+LOCZ060  DS    0H
+         ICM   R7,15,EXTCHPTR          more ZEXTs?
+         BNZ   LOCZ050                 yes, loop
+         ZTRCE LOC=H,LINKAGE=BRANCH    trace
+*
+**       Locate free ZEXT element
+*
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   LOCZ070                 yes
+         ZCALL SR=GETZEXT
+         LTR   R15,R15                 free ZEXT?
+         BNZ   LOCZ070                 no
+         ICM   R7,15,DSAZEXT           ZEXT returned?
+         BNZ   LOCZ999                 yes
+         ZTRCE LOC=I,LINKAGE=BRANCH    trace
+*
+**       Get common ZEXT element
+*
+LOCZ070  DS    0H
+         XR    R2,R2                   mi piace pulito
+         IPK   ,
+         ST    R2,DSACKEY              caller key
+         SPKA  0(0)                    supervisor key
+         CPOOL GET,UNCOND,             get unconditional               +
+               CPID=ZEVTZEXT,          cell pool ID                    +
+               REGS=SAVE,              protect my regs                 +
+               LINKAGE=SYSTEM
+         L     R2,DSACKEY              caller key
+         SPKA  0(R2)                   restore key
+         LR    R7,R1                   common ZEXT
+         ZTRCE LOC=J,LINKAGE=BRANCH    trace
+*
+**       Initialize ZEXT element
+*
+         $XC   ZEXT(EXT@SIZE),ZEXT
+         $MVC  EXTID,=CL4'ZEXT'        ID
+         $OI   EXTFLG1,EXT@GENJ        generic jobname
+         $MVC  EXTJOBNM,DSAJOBNM       propagate jobname
+         $MVC  EXTXNAME,XQEXNAME       propagate exit name
+         $MVC  EXTSTOKN,DSASTOKN       propagate STOKEN
+*
+**       Chain ZEXT to ZXQE entry
+*
+         $MVC  EXTCHPTR,XQEZEXTP       chain ZEXT
+         $ST   R7,XQEZEXTP             update queue ptr
+         ZTRCE LOC=K,LINKAGE=BRANCH    trace
+         B     LOCZ999
+*
+**       Next ZXQE queued element
+*
+LOCZ099  DS    0H
+         ICM   R8,15,XQECHPTR          more ZXQEs
+         BNZ   LOCZ000                 yes, loop
+         MVC   DSARC,=AL4(RC8)         RC
+         ZTRCE LOC=L,LINKAGE=BRANCH    trace
+         B     LOCZXIT                 exit
+*
+LOCZ999  DS    0H
+         ST    R7,DSAZEXT              target ZEXT
+         ST    R8,DSAZXQE              target ZXQE
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE LOC=M,LINKAGE=BRANCH    trace
+*
+LOCZXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAZPAR
+*---------------------------------------------------------------------*
+*        EXecuted instruction                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0H
+LOCZCOPY MVC   DSAASTYP(*-*),XKEYNAME
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        JOBPAR                                              */
+*/*                                                                  */
+*/* Function:    Parse generic jobname nested-nested routine         */
+*/*                                                                  */
+*/* Input Regs:  R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+JOBPAR   ZMACS GEN=SUBENTY,SUBSAVE=DSAXSSA
+         USING ZXQE,R8
+         USING ZRWA,R9
+         USING ZEVT,R11
+*
+         LA    R3,XQEJOBNM             generic jobname
+         LA    R4,DSAJOBNM             JMR jobname
+         LA    R2,L'DSAJOBNM           jobname length
+         CLI   0(R3),BLANK             valid jobname?
+         BE    JOBP010                 no
+         CLI   0(R4),BLANK             valid jobname?
+         BE    JOBP010                 no
+         ZTRCE JBP=0,LINKAGE=BRANCH    trace
+*
+JOBP000  DS    0H
+         CLC   0(1,R3),0(R4)           character match?
+         BE    JOBP020                 yes
+         CLI   0(R3),GENERIC           generic character?
+         BE    JOBP020                 yes
+         ZTRCE JBP=1,LINKAGE=BRANCH    trace
+*
+JOBP010  DS    0H
+         MVC   DSARC,=AL4(RC8)         no match RC
+         MVC   DSARSN,=AL4(RSN128)     RSN
+         ZTRCE JBP=2,LINKAGE=BRANCH    trace
+         B     JOBPXIT                 exit
+*
+JOBP020  DS    0H
+         LA    R3,1(,R3)               next character
+         LA    R4,1(,R4)               next character
+         BCT   R2,JOBP000              loop
+         XC    DSARC,DSARC             match RC
+         XC    DSARSN,DSARSN           match RSN
+         ZTRCE JBP=3,LINKAGE=BRANCH    trace
+*
+JOBPXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAZPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        COMMAND                                             */
+*/*                                                                  */
+*/* Function:    Issue command nested-nested routine                 */
+*/*                                                                  */
+*/* Input Regs:  R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  ZEXT address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+COMMAND  ZMACS GEN=SUBENTY,SUBSAVE=DSAXSSA
+         USING ZXQE,R8
+         USING ZRWA,R9
+         USING ZEVT,R11
+*
+**       Validity check command option
+*
+         TM    XQECOMF1,XQE@CMND       COMMAND= specified?
+         BZ    CMND099                 no, exit
+         ICM   R7,15,XQEZEXTP          ZEXT?
+         BZ    CMND000                 no
+         USING ZEXT,R7
+         TM    EXTWRKFL,EXT@CMND       command issued?
+         BNZ   CMND099                 yes, donot reissue
+*
+**       Issue specified command
+*
+CMND000  DS    0H
+         MVC   DSAPLST(CMNDTXBL),CMNDTXT
+         MVC   DSAPLST+4(XQE@COMZ),XQECOMND
+         XR    R2,R2                   mi piace pulito
+         IPK   ,
+         ST    R2,DSACKEY              caller key
+         SPKA  0(0)                    supervisor key
+         XR    R0,R0                   console ID
+         MGCR  DSAPLST                 issue command
+         ICM   R7,15,XQEZEXTP          ZEXT?
+         BZ    CMND010                 no
+         OI    EXTWRKFL,EXT@CMND       set issued indicator
+*
+CMND010  DS    0H
+         L     R2,DSACKEY              caller key
+         SPKA  0(R2)                   restore key
+*
+CMND099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+CMNDXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAZPAR
+*---------------------------------------------------------------------*
+*        MGCR listform                                                *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+CMNDTXT  DS    0XL80                   command buffer
+         DC    AL2(CMNDTXBL)           -buffer length
+         DC    AL2(0)                  -buffer options
+CMNDTXD  DC    CL76' '                 -command data
+CMNDTXDL EQU   *-CMNDTXD               -command length
+CMNDTXBL EQU   *-CMNDTXT               command buffer length
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        SMFREC                                              */
+*/*                                                                  */
+*/* Function:    Write SMF record nested-nested routine              */
+*/*                                                                  */
+*/* Input Regs:  R7  ZEXT address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R7  ZEXT address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+SMFREC   ZMACS GEN=SUBENTY,SUBSAVE=DSAXSSA
+         USING ZEXT,R7
+         USING ZXQE,R8
+         USING ZRWA,R9
+         USING ZEVT,R11
+*
+**       Check SMF recording availability
+*
+         L     R3,DSAXITA              XIT entry address
+         USING XIT,R3
+         CLI   XITSMF,XIT@SMF          SMF recording allowed?
+         BNE   SMFR099
+         DROP  R3
+*
+**       Support available with V2R1M0
+*
+         ZWTO  MID=ZEMF43W             issue availability msg
+*
+SMFR099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+*
+SMFRXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAZPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        GETZEXT                                             */
+*/*                                                                  */
+*/* Function:    Locate free ZEXT element nested-nested routine      */
+*/*                                                                  */
+*/* Input regs:  R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Input Regs:  R7  ZEXT address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 Base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+GETZEXT  ZMACS GEN=SUBENTY,SUBSAVE=DSAXSSA
+         USING ZXQE,R8
+         USING ZRWA,R9
+         USING ZEVT,R11
+*
+         ICM   R7,15,XQEZEXTP          ZEXT?
+         BZ    GETZ020                 no, exit
+         USING ZEXT,R7
+         TM    EXTFLG1,EXT@GENJ        generic jobname?
+         BZ    GETZ020                 no
+*
+GETZ000  DS    0H
+         TM    EXTFLG1,EXT@FREE        free ZEXT?
+         BZ    GETZ010                 no
+         ST    R7,DSAZEXT              yes
+         $XC   EXTC(EXT@ZERO),EXTC     partial ZEXT clear
+         $XC   EXTFLG1,EXTFLG1         zero all flags
+         $OI   EXTFLG1,EXT@GENJ        generic jobname
+         $MVC  EXTJOBNM,DSAJOBNM       propagate jobname
+         $MVC  EXTXNAME,XQEXNAME       propagate exit name
+         $MVC  EXTSTOKN,DSASTOKN       propagate STOKEN
+         XC    DSARC,DSARC             RC
+         B     GETZEXIT                exit
+*
+GETZ010  DS    0H
+         ICM   R7,15,EXTCHPTR          ZEXT?
+         BNZ   GETZ000                 yes, loop
+*
+GETZ020  DS    0H
+         XC    DSAZEXT,DSAZEXT         return zero
+         MVC   DSARC,=AL4(RC8)         RC
+*
+GETZEXIT DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAZPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        ASTYPE                                              */
+*/*                                                                  */
+*/* Function:    Identify address space type nested-nested routine   */
+*/*                                                                  */
+*/* Input Regs:  R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R0  Reason code                                     */
+*/*              R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+ASTYPE   ZMACS GEN=SUBENTY,SUBSAVE=DSAXSSA
+         USING ZXQE,R8
+         USING ZRWA,R9
+         USING ZEVT,R11
+*
+         USING PSA,0
+         L     R3,PSAAOLD              ASCB
+         USING ASCB,R3
+         ICM   R2,15,ASCBJBNS          STC?
+         BZ    ASTY010                 no
+         CLC   =CL8'INIT',0(R2)        initiator?
+         BE    ASTY010                 yes
+         ZTRCE AST=1,LINKAGE=BRANCH    trace
+         MVC   DSAASJOB,0(R2)          copy jobname
+         ICM   R2,15,ASCBTSB           TSO?
+         BZ    ASTY000                 no
+         MVC   DSAASTYP,=CL4'TSO'      TSO address space
+         ZTRCE AST=2,LINKAGE=BRANCH    trace
+         B     ASTY099
+*
+ASTY000  DS    0H
+         MVC   DSAASTYP,=CL4'STC'      STC address space
+         ZTRCE AST=3,LINKAGE=BRANCH    trace
+         B     ASTY099
+*
+ASTY010  DS    0H
+         L     R2,ASCBJBNI             jobname address
+         MVC   DSAASJOB,0(R2)          copy jobname
+         MVC   DSAASTYP,=CL4'JOB'      JOB address space
+         ZTRCE AST=4,LINKAGE=BRANCH    trace
+*
+ASTY099  DS    0H
+         XC    DSARC,DSARC             RC
+         XC    DSARSN,DSARSN           RSN
+         ZTRCE AST=5,LINKAGE=BRANCH    trace
+*
+ASTYXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAZPAR
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*/********************************************************************/
+*/*                                                                  */
+*/* Name:        LOCJOB                                              */
+*/*                                                                  */
+*/* Function:    Locate address space type nested-nested routine     */
+*/*                                                                  */
+*/* Input Regs:  R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*              R14 Return address                                  */
+*/*              R15 Entry address                                   */
+*/*                                                                  */
+*/* Regs Usage:  R5  ASCB address                                    */
+*/*              R6  CSCB address                                    */
+*/*              R7  FRR  address                                    */
+*/*              R8  ZXQE address                                    */
+*/*              R9  ZRWA address                                    */
+*/*              R10 base address                                    */
+*/*              R11 ZEVT address                                    */
+*/*              R12 DSA  address                                    */
+*/*              R13 Savearea address                                */
+*/*                                                                  */
+*/* Output Regs: R15 Return code                                     */
+*/*                                                                  */
+*/********************************************************************/
+*/-------+---------+---------+---------+---------+---------+---------*/
+LOCJOB   ZMACS GEN=SUBENTY,SUBSAVE=DSAXSSA
+         USING ZXQE,R8
+         USING ZRWA,R9
+         USING ZEVT,R11
+*
+**       Set recovery retry address
+*
+         ZRETRY LOCJ099,               retry address                   +
+               ZRWA=(R9),              ZRWA                            +
+               SRV=LOCJOB,             nested routine                  +
+               WTO=NO,                 no error msg                    +
+               DUMP=NO,                no SVC dump                     +
+               LOGREC=NO,              no LOGREC record                +
+               RSN==AL4(RSN124)        RSN
+*
+**       Serialize CSCB chain
+*
+         TM    DSAFLG1,DSA@FRRA        FRR active?
+         BNZ   LOCJ010                 yes, skip serialization
+         TM    ZEVTFLG2,ZEVT@DBG       DBG=ON?
+         BNZ   LOCJ010                 yes, skip serialization
+         ZTRCE AST=A,LINKAGE=BRANCH
+*
+LOCJ000  DS    0H
+         XR    R2,R2                   mi piace pulito
+         IPK   ,
+         ST    R2,DSACKEY              caller key
+         SPKA  0(0)                    supervisor key
+         MVC   DSAPLST(ENQQ10L),ENQQ10
+         LA    R2,ZEVTCSCB             SYSIEFSD
+         LA    R3,ZEVTQ10              Q10
+         ENQ   ((R2),(R3)),                                            +
+               LINKAGE=SYSTEM,MF=(E,DSAPLST)
+         OI    DSAFLG1,DSA@CSCB        DEQ required
+         L     R2,DSACKEY              caller key
+         SPKA  0(R2)                   rstore key
+         ZTRCE AST=B,LINKAGE=BRANCH
+*
+**       Locate target jobname
+*
+LOCJ010  DS    0H
+         USING PSA,0
+         L     R6,FLCCVT               CVT
+         USING CVT,R6
+         L     R6,CVTMSER              MSAS
+         USING BASE,R6
+         L     R6,BACHN                CSCB chain
+         USING CSCB,R6
+         XC    DSARC,DSARC             initial RC
+         ZTRCE AST=C,LINKAGE=BRANCH
+*
+LOCJ020  DS    0H
+         CLC   DSAJOBNM,CHKEY          jobnmae match?
+         BNE   LOCJ030                 no
+         ZTRCE AST=D,LINKAGE=BRANCH
+         MVC   DSAASID,CHASID          yes
+         LOCASCB ASID=DSAASID
+         LTR   R15,R15                 valid?
+         BZ    LOCJ040                 yes
+         ZTRCE AST=E,LINKAGE=BRANCH
+*
+LOCJ030  DS    0H
+         ICM   R6,15,CHPTR             more CSCBs?
+         BNZ   LOCJ020                 yes, loop
+         MVC   DSARC,=AL4(RC8)         RC
+         ZTRCE AST=F,LINKAGE=BRANCH
+         B     LOCJ099                 DEQ CSCB chain
+*
+LOCJ040  DS    0H
+         LR    R5,R1                   ASCB
+         USING ASCB,R5
+         ST    R5,DSAASCB              ASCB address
+         ICM   R4,15,ASCBJBNS          STC?
+         BZ    LOCJ060                 no
+         CLC   =CL8'INIT',0(R4)        initiator?
+         BE    LOCJ060                 yes
+         MVC   DSAASJOB,0(R4)          copy jobname
+         ICM   R4,15,ASCBTSB           TSO?
+         BZ    LOCJ050                 no
+         MVC   DSAASTYP,=CL4'TSO'      TSO
+         CLC   DSAASTYP,XQESUBID       job type match?
+         BE    LOCJ099                 yes
+         ZTRCE AST=G,LINKAGE=BRANCH
+         B     LOCJ030                 no, next CSCB
+*
+LOCJ050  DS    0H
+         MVC   DSAASTYP,=CL4'STC'      STC
+         CLC   DSAASTYP,XQESUBID       job type match?
+         BE    LOCJ099                 yes
+         ZTRCE AST=H,LINKAGE=BRANCH
+         B     LOCJ030                 no, next CSCB
+*
+LOCJ060  DS    0H
+         ICM   R4,15,ASCBJBNI          jobname ptr?
+         BZ    LOCJ030                 yikes! next CSCB
+         MVC   DSAASJOB,0(R4)          copy jobname
+         MVC   DSAASTYP,=CL4'JOB'      JOB
+         CLC   DSAASTYP,XQESUBID       job type match?
+         BNE   LOCJ030                 no, next CSCB
+         ZTRCE AST=I,LINKAGE=BRANCH
+*
+**       Release CSCB serialization
+*
+LOCJ099  DS    0H
+         MVC   DSAPLST(DEQQ10L),DEQQ10
+         SPKA  0(0)                    supervisor key
+         LA    R2,ZEVTCSCB             SYSIEFSD
+         LA    R3,ZEVTQ10              Q10
+         DEQ   ((R2),(R3)),                                            +
+               LINKAGE=SYSTEM,MF=(E,DSAPLST)
+         L     R2,DSACKEY              caller key
+         SPKA  0(R2)                   restore key
+         ZTRCE AST=J,LINKAGE=BRANCH
+*
+LOCJXIT  DS    0H
+         ZMACS GEN=SUBEXIT,OUTPAR=DSAZPAR
+*---------------------------------------------------------------------*
+*        ENQ/DEQ listform                                             *
+*--------+---------+---------+---------+---------+---------+---------+*
+         DS    0F
+ENQQ10   ENQ   (0,0,S,3,SYSTEM),RET=HAVE,LINKAGE=SYSTEM,MF=L
+ENQQ10L  EQU   *-ENQQ10
+         DS    0F
+DEQQ10   DEQ   (0,0,3,SYSTEM),RET=HAVE,LINKAGE=SYSTEM,MF=L
+DEQQ10L  EQU   *-DEQQ10
+*---------------------------------------------------------------------*
+*        Constants/Literals                                           *
+*--------+---------+---------+---------+---------+---------+---------+*
+         LTORG ,
+         DROP  ,
+*---------------------------------------------------------------------*
+*        Dynamic Storage Area                                         *
+*--------+---------+---------+---------+---------+---------+---------+*
+DSA      DSECT ,
+DSASAVE  DS    18F                     mainline savearea
+DSASBSA  DS    18F                     exit routine savearea
+DSANSSA  DS    18F                     nested subroutine savearea
+DSAXSSA  DS    18F                     nested-nested routine savearea
+         DS    0X
+DSAFLG1  DS    XL1                     flags
+DSA@FRRA EQU   X'80'                   FRR recovery indicator
+DSA@STAE EQU   X'40'                   ESTAEX recovery established
+DSA@RENQ EQU   X'20'                   EXIT ENQ active indicator
+DSA@CSCB EQU   X'10'                   CSCB ENQ active indicator
+DSA@1RV4 EQU   X'08'                   -available
+DSA@1RV5 EQU   X'04'                   -available
+DSA@1RV6 EQU   X'02'                   -available
+DSA@1RV7 EQU   X'01'                   -available
+         DS    0X
+DSAFLG2  DS    XL1                     more flags
+         DS    0F
+DSAASID  DS    H                       ASID
+         DS    0F
+DSAEKEY  DS    F                       entry key
+DSAASCM  DS    F                       entry ASC-mode
+DSACKEY  DS    F                       subroutine caller key
+DSATOKN  DS    F                       ESTAEX token
+DSAASCB  DS    F                       ASCB address
+DSAXITA  DS    F                       XIT entry address
+DSAWORD  DS    F                       workarea
+DSASIDI  DS    F                       system ID
+DSAJWTS  DS    F                       SMCA JWT() binary seconds
+DSASTEP  DS    F                       JMR step number
+DSAZXQE  DS    F                       located ZXQE address
+DSAZEXT  DS    F                       free ZEXT address
+DSASMFTP DS    F                       SMF record type
+         DS    0F
+DSAU8XW  DS    0XL8                    IEFU83,84,85,86 workarea
+DSARECAD DS    F                       -record address
+DSARTYPE DS    H                       -record type
+DSARSUBT DS    H                       -record subtype
+DSAU8XWL EQU   *-DSAU8XW               IEFU83,84,85,86 worijarea size
+         DS    0F
+DSAZPAR  DS    0XL12                  *NOTE*
+DSARC    DS    F                       -RC  (nested routines only)
+DSARSN   DS    F                       -RSN (nested routines only)
+DSAGR1   DS    F                       -R1  (nested routines only)
+DSA@ZPRL EQU   *-DSAZPAR               keep order
+         DS    0F
+DSAOPAR  DS    0XL12                  *output GPRs
+DSAORC   DS    F                       -R15
+DSAOGR0  DS    F                       -R0
+DSAOGR1  DS    F                       -R1
+DSA@OPRL EQU   *-DSAOPAR               keep order
+         DS    0D
+DSAXPAR  DS    0XL8                   *exit parmdata
+DSAGPR0  DS    F                       -GPR0
+DSAGPR1  DS    F                       -GPR1
+DSA@GPRZ EQU   *-DSAXPAR               keep order
+         DS    0D
+DSAEXIT  DS    0XL8                   *exit name
+DSAAR0   DS    F                       -AR0 (1st 4 bytes of exit name)
+DSAAR1   DS    F                       -AR1 (last 4 bytes of exit name)
+DSA@ARLZ EQU   *-DSAEXIT               keep order
+         DS    0F
+DSASJWT  DS    CL4                     SMFPRMxx JWT(hhmm) value
+DSASUBNM DS    CL4                     {JES2/3|TSO|STC|OMVS|ASCH}
+DSAASTYP DS    CL4                     {JOB|STC}TSO} ASCB job type
+DSAJOBNM DS    CL8                     JMR jobname
+DSAASJOB DS    CL8                     ASCB jobname
+DSAVAR   DS    CL8                     variable data
+DSAVARX  DS    CL1                     slack byte
+DSA@VARZ EQU   *-DSAVAR                keep order
+         DS    0D
+DSASASN  DS    D                       caller SASN
+DSADWRD  DS    D                       conversion workarea
+DSADWRD2 DS    D                       conversion workarea
+DSASTOKN DS    XL8                     addres space STOKEN
+DSAWORKA DS    CL8                     work area
+DSAEDITM DS    XL10                    EDit mask
+         DS    0F
+DSAZFRR  DS    CL(FRR@SIZE)            dummy FRR workarea
+DSA@ZFRR EQU   *-DSAZFRR               dummy FRR length
+         DS    0F
+DSADSN   DS    0CL46                   DSNAME workarea
+DSADSNLN DS    AL2                     -dataset name length
+DSADSNAM DS    CL44                    -dataset name
+DSA@DSNL EQU   *-DSADSN                keep order
+         DS    0F
+DSAVDATA DS    CL144                   variable workarea
+DSA@VDTL EQU   *-DSAVDATA              -workarea length
+         DS    0F
+DSAZRWA  DS    CL(ZRWA@SZE)            ZRWA recovery workarea
+DSA@RWAZ EQU   *-DSAZRWA
+         DS    0F
+DSAPLST  DS    XL256                   parmlist
+DSA@PLSZ EQU   *-DSAPLST
+         DS    0D
+DSA@SIZE EQU   *-DSA                   size of DSA
+*---------------------------------------------------------------------*
+*        Data Areas                                                   *
+*--------+---------+---------+---------+---------+---------+---------+*
+         ZTABS GEN=KEY,DSECT=YES
+         ZTABS GEN=VAR,DSECT=YES
+         ZTABS GEN=XIT,DSECT=YES
+         ZMACS GEN=MID,ID=XID,DSECT=YES
+         IEFTCT ,
+         IEFJMR ,
+         IFASMFH ,
+         IFAU29LM ,
+         IFAEXITP ,
+         ZEVT  DSECT=YES,LIST=YES
+         END ,
